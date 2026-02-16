@@ -153,7 +153,6 @@ docker exec -it agentbox /bin/bash
 # Inside container, you can run interactive commands:
 openclaw onboard --install-daemon    # Full onboarding wizard
 openclaw configure                   # Configuration wizard
-openclaw agent chat "Hello!"         # Interactive AI chat
 openclaw tui                         # Text-based UI for monitoring and control
 
 # Exit shell when done
