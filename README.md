@@ -23,28 +23,85 @@ AgentBox is a security-first AI agent framework designed for isolated VM deploym
 
 ### Prerequisites
 
-- **macOS**: [UTM](https://mac.getutm.app/) or [VirtualBox](https://www.virtualbox.org/)
-- **Linux**: [QEMU/KVM](https://www.qemu.org/) or [VirtualBox](https://www.virtualbox.org/)
-- **Any OS**: [Docker Desktop](https://www.docker.com/products/docker-desktop) or [Vagrant](https://www.vagrantup.com/)
+- **Docker**: [Docker Desktop](https://www.docker.com/products/docker-desktop) or Docker Engine
+- **macOS**: [UTM](https://mac.getutm.app/) or [VirtualBox](https://www.virtualbox.org/) (for full VM)
+- **Linux**: [QEMU/KVM](https://www.qemu.org/) or [VirtualBox](https://www.virtualbox.org/) (for full VM)
 
-### Option 1: Docker (Fastest)
+### Option 1: Docker (Recommended)
+
+#### Build the Image
 
 ```bash
 # Clone the repo
 git clone https://github.com/travis-burmaster/agentbox.git
 cd agentbox
 
-# Build the secure container
-docker build -t agentbox .
-
-# Run with encrypted secrets
-docker run -it --name agentbox \
-  -v $(pwd)/secrets:/agentbox/secrets:ro \
-  -p 127.0.0.1:3000:3000 \
-  agentbox
+# Build the Docker image (takes 5-10 minutes)
+docker build -t agentbox:latest .
 ```
 
-### Option 2: Vagrant (Full VM)
+#### Verify the Build
+
+```bash
+# Check OpenClaw version
+docker run --rm agentbox:latest openclaw --version
+# Output: 2026.2.15
+
+# View available commands
+docker run --rm agentbox:latest openclaw --help
+
+# Run diagnostics
+docker run --rm agentbox:latest openclaw doctor
+```
+
+#### Using OpenClaw CLI in Docker
+
+The container includes a fully functional OpenClaw installation. You can run any OpenClaw command:
+
+```bash
+# Check system status
+docker run --rm agentbox:latest openclaw status
+
+# Run configuration wizard (interactive)
+docker run -it agentbox:latest openclaw configure
+
+# List available models
+docker run --rm agentbox:latest openclaw models list
+
+# View skills
+docker run --rm agentbox:latest openclaw skills list
+
+# Check security settings
+docker run --rm agentbox:latest openclaw security audit
+```
+
+#### Running with Persistent Storage
+
+For long-running deployments, mount volumes for data persistence:
+
+```bash
+# Create persistent volumes
+docker run -d --name agentbox \
+  -v agentbox-data:/agentbox/data \
+  -v agentbox-logs:/agentbox/logs \
+  -v $(pwd)/secrets:/agentbox/secrets:ro \
+  -p 127.0.0.1:3000:3000 \
+  agentbox:latest
+```
+
+#### Interactive Shell Access
+
+```bash
+# Open a shell in the container
+docker run -it --rm agentbox:latest /bin/bash
+
+# Inside container, you can run:
+openclaw --version
+openclaw doctor
+openclaw configure
+```
+
+### Option 2: Vagrant (Full VM - Coming Soon)
 
 ```bash
 # Clone and start VM
@@ -55,13 +112,62 @@ vagrant up
 # SSH into the VM
 vagrant ssh
 
-# Inside VM: Initialize AgentBox
-agentbox init
+# Inside VM: Initialize OpenClaw
+openclaw init
 ```
 
 ### Option 3: Manual VM Setup
 
 See [VM_SETUP.md](./docs/VM_SETUP.md) for UTM, QEMU/KVM, and VirtualBox instructions.
+
+---
+
+## 📊 Current Status
+
+### ✅ What Works
+
+- **Docker Build**: Full OpenClaw compilation and installation
+- **CLI Commands**: All `openclaw` CLI commands function correctly
+- **Diagnostics**: `openclaw doctor`, `openclaw status`, `openclaw --help`
+- **Model Management**: List and configure AI models
+- **Skills**: View and manage agent skills
+- **Security Tools**: Security auditing and configuration
+
+### 🚧 In Progress
+
+- **Gateway Service**: Requires configuration for daemon mode
+  - CLI commands work fully ✅
+  - Gateway daemon requires systemd (working on Docker-compatible solution)
+  - Workaround: Use `openclaw configure` to set up, then run specific commands
+
+- **Encrypted Secrets**: Template ready, needs integration testing
+- **Network Isolation**: Firewall rules defined, needs runtime configuration
+- **Vagrant VM**: Configuration files in progress
+
+### 🎯 Next Steps
+
+To run the full gateway service in Docker:
+
+1. **Configure OpenClaw**:
+   ```bash
+   docker run -it -v agentbox-config:/agentbox/.openclaw agentbox:latest openclaw configure
+   ```
+
+2. **Set Gateway Mode**:
+   ```bash
+   docker run --rm -v agentbox-config:/agentbox/.openclaw agentbox:latest \
+     openclaw config set gateway.mode local
+   ```
+
+3. **Run Gateway** (when systemd-free mode is ready):
+   ```bash
+   docker run -d -v agentbox-config:/agentbox/.openclaw \
+     -p 127.0.0.1:3000:3000 agentbox:latest openclaw gateway start
+   ```
+
+For now, you can use all CLI commands directly without the gateway daemon.
+
+---
 
 ## 🔐 Encrypted Secrets Management
 
@@ -147,31 +253,43 @@ secrets/
 
 ```
 agentbox/
-├── Dockerfile              # Docker container config
-├── Vagrantfile             # Vagrant VM config (coming soon)
-├── agentfork/              # Core AgentBox framework (fork from OpenClaw)
-├── vm-configs/             # VM configurations (coming soon)
-│   ├── utm/               # macOS UTM configs
-│   ├── qemu/              # Linux QEMU/KVM configs
-│   └── virtualbox/        # Cross-platform VirtualBox
-├── security/
-│   ├── firewall.rules     # UFW/iptables rules
-│   ├── selinux/           # SELinux policies
-│   ├── apparmor/          # AppArmor profiles
-│   └── audit.conf         # Auditd configuration
+├── Dockerfile              # ✅ Docker container config (working)
+├── docker-entrypoint.sh    # ✅ Container startup script with secrets loading
+├── agentfork/              # ✅ Core OpenClaw framework (built from source)
+│   ├── src/               # OpenClaw source code
+│   ├── dist/              # Compiled JavaScript
+│   ├── package.json       # Node.js dependencies
+│   └── openclaw.mjs       # CLI entry point
 ├── scripts/
-│   ├── load-secrets.sh    # Decrypt secrets helper
-│   ├── rotate-keys.sh     # Key rotation automation
-│   ├── backup.sh          # Encrypted backup script
-│   └── harden.sh          # Security hardening script
+│   └── (coming soon)      # Helper scripts for secrets, backup, hardening
 ├── secrets/
-│   ├── .gitignore         # Protects private keys
-│   └── README.md          # Secrets management guide
+│   └── (template)         # Encrypted secrets management templates
+├── security/
+│   └── (coming soon)      # Firewall rules, SELinux, AppArmor profiles
+├── vm-configs/            # (coming soon)
+│   ├── utm/              # macOS UTM configs
+│   ├── qemu/             # Linux QEMU/KVM configs
+│   └── virtualbox/       # Cross-platform VirtualBox
 └── docs/
-    ├── VM_SETUP.md        # Detailed VM setup guides
-    ├── SECURITY.md        # Security architecture
-    └── THREAT_MODEL.md    # Threat analysis
+    ├── SECURITY.md        # Security architecture documentation
+    └── (expanding)        # More guides coming
 ```
+
+### What Actually Runs
+
+The Docker image includes:
+- **Ubuntu 22.04** base system
+- **Node.js 22.x** runtime
+- **OpenClaw 2026.2.15** fully compiled and installed
+- **System tools**: curl, wget, git, build-essential
+- **Security tools**: age encryption, ufw firewall, fail2ban, auditd
+- **Python 3** with pip for extensions
+
+### Image Size
+
+- **Compressed**: ~1.5 GB
+- **Uncompressed**: ~4.4 GB
+- **Build time**: 5-10 minutes (with caching)
 
 ## 🔧 Configuration
 
@@ -232,25 +350,89 @@ vm:
 
 ## 📋 Roadmap
 
-- [ ] **v0.1.0** - Initial release (Docker + Vagrant)
-  - [x] Encrypted secrets with age
-  - [x] Docker container build
-  - [ ] Vagrant VM configs
-  - [ ] Basic VM configs (UTM, QEMU, VirtualBox)
-  - [ ] Network isolation (firewall rules)
-  - [ ] Audit logging
-  
-- [ ] **v0.2.0** - Enhanced Security
-  - [ ] SELinux/AppArmor profiles
-  - [ ] Automatic key rotation
-  - [ ] Tor/VPN routing
+### v0.1.0 - Foundation (Current)
+
+- [x] **Docker Build System**
+  - [x] OpenClaw compilation from source
+  - [x] Node.js 22.x integration
+  - [x] Multi-stage build optimization
+  - [x] Working CLI commands
+
+- [x] **Core Components**
+  - [x] OpenClaw 2026.2.15 fully functional
+  - [x] age encryption tools installed
+  - [x] Security tools (ufw, fail2ban, auditd)
+  - [x] Python 3 runtime
+
+- [ ] **Secrets Management** (Template Ready)
+  - [x] age encryption support
+  - [ ] Automated secrets loading in entrypoint
+  - [ ] Key rotation scripts
+  - [ ] Backup automation
+
+- [ ] **Gateway Service**
+  - [x] CLI commands working
+  - [ ] Docker-compatible daemon mode (no systemd dependency)
+  - [ ] Configuration wizard
+  - [ ] Persistent storage configuration
+
+### v0.2.0 - VM Deployment
+
+- [ ] **Vagrant Integration**
+  - [ ] Vagrantfile for automated VM provisioning
+  - [ ] Multi-provider support (VirtualBox, VMware, Parallels)
+  - [ ] Shared folder configuration
+
+- [ ] **Manual VM Configs**
+  - [ ] UTM (macOS) configuration files
+  - [ ] QEMU/KVM (Linux) setup scripts  
+  - [ ] VirtualBox OVA exports
+
+- [ ] **Network Isolation**
+  - [ ] UFW firewall rules
+  - [ ] API endpoint allowlists
+  - [ ] DNS-over-HTTPS configuration
+  - [ ] Optional Tor/VPN routing
+
+### v0.3.0 - Enhanced Security
+
+- [ ] **Mandatory Access Control**
+  - [ ] SELinux policies
+  - [ ] AppArmor profiles
+  - [ ] Seccomp filters
+
+- [ ] **Audit & Monitoring**
+  - [ ] Immutable append-only logging
+  - [ ] Syslog integration
+  - [ ] Tamper-evident log signatures
+  - [ ] Security event alerting
+
+- [ ] **Advanced Secrets**
   - [ ] Hardware security module (HSM) support
-  
-- [ ] **v0.3.0** - Compliance Features
+  - [ ] PKCS#11 integration
+  - [ ] Automatic key rotation
+  - [ ] Multi-key encryption (threshold)
+
+### v0.4.0 - Compliance & Enterprise
+
+- [ ] **Compliance Frameworks**
   - [ ] FIPS 140-2 mode
   - [ ] STIG hardening
-  - [ ] Compliance reporting (HIPAA, PCI)
+  - [ ] Compliance reporting (HIPAA, PCI, SOC 2)
+  - [ ] CIS Benchmark alignment
+
+- [ ] **Enterprise Features**
+  - [ ] Multi-tenancy support
+  - [ ] Centralized logging (SIEM integration)
+  - [ ] Role-based access control (RBAC)
   - [ ] Zero-knowledge backup
+
+### Future Considerations
+
+- [ ] Kubernetes deployment (Helm charts)
+- [ ] ARM64 support (Apple Silicon, Raspberry Pi)
+- [ ] WebAssembly sandbox for untrusted code
+- [ ] Hardware root of trust (TPM, Secure Enclave)
 
 ## 🤝 Contributing
 
@@ -271,14 +453,99 @@ AgentBox was inspired by and builds upon [OpenClaw](https://github.com/openclaw/
 - **Vagrant** - HashiCorp's VM automation tool
 - **Docker** - Container platform
 
+## 🔍 Troubleshooting
+
+### Docker Build Issues
+
+**Problem**: Build fails with "could not resolve module" errors
+
+**Solution**: Ensure you have the latest OpenClaw source files:
+```bash
+# The repository includes all necessary source files
+# If you encounter missing modules, try a clean build:
+docker build --no-cache -t agentbox:latest .
+```
+
+**Problem**: Build takes too long or runs out of memory
+
+**Solution**: Increase Docker resources:
+- **Docker Desktop**: Settings → Resources → Memory (increase to 8GB+)
+- **Linux**: Check `docker info` for available resources
+
+### Runtime Issues
+
+**Problem**: `openclaw` command not found in container
+
+**Solution**: The container uses the binary name `openclaw` (not `agentbox`):
+```bash
+# Correct:
+docker run --rm agentbox:latest openclaw --version
+
+# Incorrect:
+docker run --rm agentbox:latest agentbox --version
+```
+
+**Problem**: Gateway fails to start with systemd error
+
+**Solution**: This is expected. Gateway daemon mode requires configuration. Use CLI commands directly:
+```bash
+# Instead of running the gateway daemon:
+docker run --rm agentbox:latest openclaw status
+docker run --rm agentbox:latest openclaw models list
+docker run --rm agentbox:latest openclaw skills list
+```
+
+**Problem**: Container exits immediately
+
+**Solution**: The default CMD tries to start the gateway service. Override it:
+```bash
+# Run a specific command:
+docker run --rm agentbox:latest openclaw doctor
+
+# Open a shell:
+docker run -it --rm agentbox:latest /bin/bash
+```
+
+### Common Commands Reference
+
+```bash
+# Version check
+docker run --rm agentbox:latest openclaw --version
+
+# System diagnostics
+docker run --rm agentbox:latest openclaw doctor
+
+# Configuration wizard (interactive)
+docker run -it agentbox:latest openclaw configure
+
+# List available models
+docker run --rm agentbox:latest openclaw models list
+
+# List installed skills
+docker run --rm agentbox:latest openclaw skills list
+
+# Security audit
+docker run --rm agentbox:latest openclaw security audit
+
+# Help for any command
+docker run --rm agentbox:latest openclaw <command> --help
+```
+
+---
+
 ## 📞 Support
 
 - **Documentation:** [docs/](./docs/)
 - **Issues:** [GitHub Issues](https://github.com/travis-burmaster/agentbox/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/travis-burmaster/agentbox/discussions)
+- **OpenClaw Docs:** [https://docs.openclaw.ai](https://docs.openclaw.ai)
 
 ---
 
-**⚠️ Alpha Software:** AgentBox is in early development. Use in production at your own risk. Always test in a safe environment first.
+## ⚠️ Important Notices
 
-**🔐 Security Notice:** Encryption is only as strong as your key management. Keep your `agent.key` safe, backed up, and never commit it to version control.
+**Alpha Software:** AgentBox is in early development. The Docker CLI interface is fully functional, but gateway daemon mode requires additional configuration. Use in production at your own risk. Always test in a safe environment first.
+
+**Security Notice:** Encryption is only as strong as your key management. Keep your `agent.key` safe, backed up, and never commit it to version control.
+
+**OpenClaw Integration:** This project uses OpenClaw as its core framework. The command-line tool is `openclaw`, not `agentbox`. AgentBox adds security, VM isolation, and encrypted secrets management on top of OpenClaw's foundation.
