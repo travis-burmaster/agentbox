@@ -2,19 +2,22 @@
 
 **Self-hosted AI agent runtime in a secure VM with encrypted secrets**
 
-AgentBox is a security-first fork of [OpenClaw](https://github.com/openclaw/openclaw) designed for isolated VM deployment on macOS and Linux. Run AI agents with complete host isolation, encrypted secrets storage, and enterprise-grade security controls.
+AgentBox is a security-first AI agent framework designed for isolated VM deployment on macOS and Linux. Run AI agents with complete host isolation, encrypted secrets storage, and enterprise-grade security controls.
+
+> **Note:** AgentBox was inspired by and built upon the foundation of [OpenClaw](https://github.com/openclaw/openclaw), an open-source personal AI agent framework. We are grateful to the OpenClaw community for pioneering accessible self-hosted AI agents. AgentBox extends these concepts with enhanced security, encrypted secrets management, and VM isolation for enterprise and privacy-focused deployments.
 
 ## 🎯 Why AgentBox?
 
-| Feature | AgentBox | OpenClaw | Cloud AI Services |
-|---------|----------|----------|-------------------|
+| Feature | AgentBox | Standard AI Tools | Cloud AI Services |
+|---------|----------|-------------------|-------------------|
 | **VM Isolation** | ✅ Built-in | ⚠️ Manual | ❌ N/A |
 | **Encrypted Secrets** | ✅ age encryption | ⚠️ Plain .env | ⚠️ Provider KMS |
 | **Zero Host Access** | ✅ Default | ❌ Full access | ❌ Cloud access |
-| **Audit Logging** | ✅ Immutable logs | ✅ Session logs | ⚠️ Limited |
+| **Audit Logging** | ✅ Immutable logs | ⚠️ Limited | ⚠️ Limited |
 | **Network Isolation** | ✅ Firewall rules | ⚠️ Manual | ❌ Internet required |
 | **Snapshot/Rollback** | ✅ VM snapshots | ❌ N/A | ❌ N/A |
 | **Air-gap Capable** | ✅ Optional | ❌ Internet required | ❌ Cloud only |
+| **Self-Hosted** | ✅ Complete control | ⚠️ Varies | ❌ SaaS only |
 
 ## 🚀 Quick Start
 
@@ -28,7 +31,7 @@ AgentBox is a security-first fork of [OpenClaw](https://github.com/openclaw/open
 
 ```bash
 # Clone the repo
-git clone https://github.com/ellucas-creator/agentbox.git
+git clone https://github.com/travis-burmaster/agentbox.git
 cd agentbox
 
 # Build the secure container
@@ -45,7 +48,7 @@ docker run -it --name agentbox \
 
 ```bash
 # Clone and start VM
-git clone https://github.com/ellucas-creator/agentbox.git
+git clone https://github.com/travis-burmaster/agentbox.git
 cd agentbox
 vagrant up
 
@@ -74,7 +77,7 @@ age-keygen -o secrets/agent.key
 age1abc123...xyz789
 
 # Add secrets
-cat > secrets/secrets.env.age <<EOF
+cat > secrets/secrets.env <<EOF
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 TELEGRAM_BOT_TOKEN=123456:ABC...
@@ -145,8 +148,9 @@ secrets/
 ```
 agentbox/
 ├── Dockerfile              # Docker container config
-├── Vagrantfile             # Vagrant VM config
-├── vm-configs/
+├── Vagrantfile             # Vagrant VM config (coming soon)
+├── agentfork/              # Core AgentBox framework (fork from OpenClaw)
+├── vm-configs/             # VM configurations (coming soon)
 │   ├── utm/               # macOS UTM configs
 │   ├── qemu/              # Linux QEMU/KVM configs
 │   └── virtualbox/        # Cross-platform VirtualBox
@@ -226,28 +230,12 @@ vm:
 - Reproducible experiments (VM snapshots)
 - Network isolation for adversarial testing
 
-## 🆚 Comparison to OpenClaw
-
-AgentBox is **not a replacement** for OpenClaw—it's a specialized security fork.
-
-**Use OpenClaw if:**
-- You want the official, actively maintained version
-- You're running on bare metal (Raspberry Pi, VPS, laptop)
-- You need the latest features and community support
-
-**Use AgentBox if:**
-- Security and isolation are top priority
-- You need encrypted secrets storage
-- You want VM-based deployment
-- You require compliance (HIPAA, PCI, etc.)
-- You're in a high-security environment
-
-**Can I contribute back?** Yes! Security improvements made in AgentBox may be upstreamed to OpenClaw.
-
 ## 📋 Roadmap
 
 - [ ] **v0.1.0** - Initial release (Docker + Vagrant)
   - [x] Encrypted secrets with age
+  - [x] Docker container build
+  - [ ] Vagrant VM configs
   - [ ] Basic VM configs (UTM, QEMU, VirtualBox)
   - [ ] Network isolation (firewall rules)
   - [ ] Audit logging
@@ -268,23 +256,26 @@ AgentBox is **not a replacement** for OpenClaw—it's a specialized security for
 
 Security contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-**Security vulnerabilities:** Report privately via GitHub Security Advisories or email security@[domain].
+**Security vulnerabilities:** Report privately via GitHub Security Advisories.
 
 ## 📜 License
 
-AgentBox is released under the **MIT License** (same as OpenClaw).
+AgentBox is released under the **MIT License**.
 
-## 🙏 Credits
+## 🙏 Acknowledgments
 
-- **OpenClaw** - Original framework by the OpenClaw team
+AgentBox was inspired by and builds upon [OpenClaw](https://github.com/openclaw/openclaw), an open-source framework for self-hosted AI agents. We extend our gratitude to the OpenClaw team and community for their pioneering work in making AI agents accessible and self-hostable.
+
+**Other Credits:**
 - **age** - Modern encryption tool by Filippo Valsorda
 - **Vagrant** - HashiCorp's VM automation tool
+- **Docker** - Container platform
 
 ## 📞 Support
 
 - **Documentation:** [docs/](./docs/)
-- **Issues:** [GitHub Issues](https://github.com/ellucas-creator/agentbox/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/ellucas-creator/agentbox/discussions)
+- **Issues:** [GitHub Issues](https://github.com/travis-burmaster/agentbox/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/travis-burmaster/agentbox/discussions)
 
 ---
 
