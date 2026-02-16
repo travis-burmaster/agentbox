@@ -72,15 +72,16 @@ services:
     image: agentbox-telemetry:latest
     container_name: agentbox-telemetry
     hostname: telemetry
-    
+
     # Port mapping (bind to localhost only)
     ports:
       - "127.0.0.1:8501:8501"
-    
-    # Mount OpenClaw logs as read-only
+
+    # Mount OpenClaw data as read-only
     volumes:
       - openclaw-logs:/tmp/openclaw:ro
       - agentbox-logs:/agentbox/logs:ro
+      - agentbox-config:/root/.openclaw:ro  # Share config (includes sessions)
     
     # Resource limits (lightweight Streamlit app)
     deploy:

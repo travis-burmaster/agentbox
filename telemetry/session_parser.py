@@ -467,8 +467,14 @@ class OpenClawSessionParser:
 
 
 if __name__ == "__main__":
-    # Default OpenClaw sessions directory
-    sessions_dir = os.path.expanduser("~/.openclaw/agents/main/sessions")
-    
+    # Default OpenClaw sessions directory (Docker path)
+    sessions_dir = os.getenv("OPENCLAW_SESSIONS_DIR") or os.path.expanduser("~/.openclaw/.openclaw/agents/main/sessions")
+
+    # Fallback to standard location if Docker path doesn't exist
+    if not Path(sessions_dir).exists():
+        sessions_dir = os.path.expanduser("~/.openclaw/agents/main/sessions")
+
+    print(f"📂 Using sessions directory: {sessions_dir}")
+
     parser = OpenClawSessionParser(sessions_dir)
     parser.scan_all_sessions()

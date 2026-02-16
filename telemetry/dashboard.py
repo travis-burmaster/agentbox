@@ -89,7 +89,11 @@ class OpenClawDashboard:
         # Only initialize parser if not skipped and BMasterAI is available
         if not skip_parser and BMASTERAI_AVAILABLE:
             try:
-                sessions_dir = os.path.expanduser("~/.openclaw/agents/main/sessions")
+                # Check for sessions in OpenClaw directory structure
+                sessions_dir = os.getenv("OPENCLAW_SESSIONS_DIR") or os.path.expanduser("~/.openclaw/.openclaw/agents/main/sessions")
+                if not Path(sessions_dir).exists():
+                    # Fallback to standard location
+                    sessions_dir = os.path.expanduser("~/.openclaw/agents/main/sessions")
                 if Path(sessions_dir).exists():
                     # Initialize parser WITHOUT immediate scanning to prevent startup crashes
                     self.parser = OpenClawSessionParser(
@@ -598,19 +602,19 @@ def main():
             with col1:
                 st.metric(
                     "Total Sessions",
-                    f"{int(metrics.get('total_sessions', 0)):,}",
+                    f"{int(metrics.get('total_sessions') or 0):,}",
                     help="Number of OpenClaw sessions"
                 )
             
             with col2:
                 st.metric(
                     "Total Messages",
-                    f"{int(metrics.get('total_messages', 0)):,}",
+                    f"{int(metrics.get('total_messages') or 0):,}",
                     help="LLM API calls made"
                 )
             
             with col3:
-                total_tokens = int(metrics.get('total_input_tokens', 0)) + int(metrics.get('total_output_tokens', 0))
+                total_tokens = int(metrics.get('total_input_tokens') or 0) + int(metrics.get('total_output_tokens') or 0)
                 st.metric(
                     "Total Tokens",
                     f"{total_tokens:,}",
@@ -620,7 +624,7 @@ def main():
             with col4:
                 st.metric(
                     "Total Cost",
-                    f"${metrics.get('total_cost', 0):.2f}",
+                    f"${float(metrics.get('total_cost') or 0):.2f}",
                     help="Total API costs"
                 )
             
@@ -629,16 +633,16 @@ def main():
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.metric("Input Tokens", f"{int(metrics.get('total_input_tokens', 0)):,}")
+                st.metric("Input Tokens", f"{int(metrics.get('total_input_tokens') or 0):,}")
             
             with col2:
-                st.metric("Output Tokens", f"{int(metrics.get('total_output_tokens', 0)):,}")
+                st.metric("Output Tokens", f"{int(metrics.get('total_output_tokens') or 0):,}")
             
             with col3:
-                st.metric("Cache Read", f"{int(metrics.get('total_cache_read_tokens', 0)):,}")
+                st.metric("Cache Read", f"{int(metrics.get('total_cache_read_tokens') or 0):,}")
             
             with col4:
-                st.metric("Cache Write", f"{int(metrics.get('total_cache_write_tokens', 0)):,}")
+                st.metric("Cache Write", f"{int(metrics.get('total_cache_write_tokens') or 0):,}")
             
             # Charts row
             col1, col2 = st.columns(2)
