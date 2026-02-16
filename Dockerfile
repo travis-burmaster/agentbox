@@ -68,7 +68,7 @@ RUN mkdir -p \
     /agentbox/secrets \
     /agentbox/data \
     /agentbox/logs \
-    /agentbox/.agentbox/workspace \
+    /agentbox/.openclaw/workspace \
     && chown -R agentbox:agentbox /agentbox
 
 # Install Python dependencies (if any)
@@ -98,12 +98,16 @@ VOLUME ["/agentbox/secrets", "/agentbox/data", "/agentbox/logs"]
 
 # Environment variables (override at runtime)
 ENV NODE_ENV=production
-ENV AGENTBOX_HOME=/agentbox
-ENV AGENTBOX_WORKSPACE=/agentbox/.agentbox/workspace
+ENV OPENCLAW_HOME=/agentbox/.openclaw
+ENV OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace
+ENV OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
 
 # Entrypoint script
 COPY --chown=agentbox:agentbox docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Copy default config
+COPY --chown=agentbox:agentbox config/openclaw.json /agentbox/.openclaw/openclaw.json
+
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["openclaw", "gateway", "start"]
+CMD ["openclaw", "gateway", "run"]

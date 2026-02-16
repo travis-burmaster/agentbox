@@ -1,0 +1,6 @@
+{
+  "gateway": {
+    "mode": "local",
+    "port": 3000
+  }
+}

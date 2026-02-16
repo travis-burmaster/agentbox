@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  agentbox:
+    build: .
+    image: agentbox:latest
+    container_name: agentbox
+    hostname: agentbox
+    
+    # Port mapping (bind to localhost only for security)
+    ports:
+      - "127.0.0.1:3000:3000"
+    
+    # Persistent volumes
+    volumes:
+      # Config and state (persistent across restarts)
+      - agentbox-config:/agentbox/.openclaw
+      
+      # Data directory (databases, caches, etc.)
+      - agentbox-data:/agentbox/data
+      
+      # Logs (append-only, can be mounted read-only on host)
+      - agentbox-logs:/agentbox/logs
+      
+      # Encrypted secrets (mount as read-only)
+      # Uncomment and configure secrets/ directory first:
+      # - ./secrets:/agentbox/secrets:ro
+    
+    # Environment variables
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_HOME=/agentbox/.openclaw
+      - OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace
+      - OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
+      
+      # Add your API keys here (or use secrets volume):
+      # - ANTHROPIC_API_KEY=sk-ant-...
+      # - OPENAI_API_KEY=sk-...
+      # - TELEGRAM_BOT_TOKEN=...
+    
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Named volumes for persistence
+volumes:
+  agentbox-config:
+    driver: local
+  agentbox-data:
+    driver: local
+  agentbox-logs:
+    driver: local

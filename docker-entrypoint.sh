@@ -36,10 +36,25 @@ fi
 
 echo ""
 
-# Initialize AgentBox workspace if not already done
-if [ ! -d "/agentbox/.agentbox/workspace" ]; then
-    echo "📦 Initializing AgentBox workspace..."
-    openclaw init
+# Ensure required directories exist
+mkdir -p /agentbox/.openclaw/workspace
+mkdir -p /agentbox/data
+mkdir -p /agentbox/logs
+
+# Check if config exists, if not use default
+if [ ! -f "/agentbox/.openclaw/openclaw.json" ]; then
+    echo "⚙️  No config found, checking for default..."
+    if [ -f "/agentbox/.openclaw/openclaw.json" ]; then
+        echo "✅ Using default config"
+    else
+        echo "⚠️  Warning: No config found, gateway may need setup"
+    fi
+fi
+
+# Initialize workspace if needed
+if [ ! -d "/agentbox/.openclaw/workspace" ]; then
+    echo "📦 Initializing OpenClaw workspace..."
+    OPENCLAW_HOME=/agentbox/.openclaw openclaw init || true
     echo "✅ Workspace initialized"
     echo ""
 fi
