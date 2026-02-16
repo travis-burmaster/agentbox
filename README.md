@@ -154,12 +154,41 @@ docker exec -it agentbox /bin/bash
 openclaw onboard --install-daemon    # Full onboarding wizard
 openclaw configure                   # Configuration wizard
 openclaw agent chat "Hello!"         # Interactive AI chat
+openclaw tui                         # Text-based UI for monitoring and control
 
 # Exit shell when done
 exit
 ```
 
 **Tip:** Use the `./onboard.sh` helper script for easier onboarding!
+
+#### Text-Based UI (TUI)
+
+OpenClaw includes a terminal-based user interface for real-time monitoring and control:
+
+```bash
+# Connect to container and launch TUI
+docker exec -it agentbox /bin/bash
+openclaw tui
+
+# Or in one command:
+docker exec -it agentbox openclaw tui
+```
+
+**TUI Features:**
+- 📊 Real-time session monitoring
+- 💬 Live message streams
+- 🔧 Interactive agent control
+- 📈 System metrics and status
+- ⌨️ Keyboard shortcuts for navigation
+
+**Controls:**
+- `q` or `Ctrl+C` - Exit TUI
+- Arrow keys - Navigate
+- `Tab` - Switch panels
+- `Enter` - Select/activate
+
+**Note:** The TUI requires a terminal with proper TTY support. If you get display issues, ensure you're using `docker exec -it` (with `-it` flags).
 
 ### Option 2: Vagrant (Full VM - Coming Soon)
 
