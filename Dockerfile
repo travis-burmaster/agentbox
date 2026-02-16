@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Security: Run as non-root user
 RUN useradd -m -s /bin/bash -u 1000 agentbox
 
-# Install system dependencies
+# Install system dependencies (excluding Node.js - installed from NodeSource below)
 RUN apt-get update && apt-get install -y \
     # Core utilities
     curl \
@@ -30,9 +30,6 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
-    # Node.js
-    nodejs \
-    npm \
     # Security tools
     age \
     ufw \
@@ -42,11 +39,14 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js LTS
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+# Install Node.js 22.x from NodeSource (required by OpenClaw)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install pnpm (required for OpenClaw build)
+RUN npm install -g pnpm@latest
 
 # Create application directory
 WORKDIR /agentbox
