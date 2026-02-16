@@ -1,3 +1,5 @@
+![AgentBox Banner](assets/agentbox-banner.jpg)
+
 # 🔒 AgentBox
 
 **Self-hosted AI agent runtime in a secure VM with encrypted secrets**
