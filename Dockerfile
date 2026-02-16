@@ -1,13 +1,13 @@
 # AgentBox - Secure AI Agent Runtime
-# Based on OpenClaw with enhanced security and encrypted secrets
+# Self-hosted AI agent framework with encrypted secrets and VM isolation
 
 FROM ubuntu:22.04
 
 # Metadata
 LABEL org.opencontainers.image.title="AgentBox"
 LABEL org.opencontainers.image.description="Self-hosted AI agent runtime with encrypted secrets"
-LABEL org.opencontainers.image.url="https://github.com/ellucas-creator/agentbox"
-LABEL org.opencontainers.image.source="https://github.com/ellucas-creator/agentbox"
+LABEL org.opencontainers.image.url="https://github.com/travis-burmaster/agentbox"
+LABEL org.opencontainers.image.source="https://github.com/travis-burmaster/agentbox"
 LABEL org.opencontainers.image.version="0.1.0"
 
 # Avoid interactive prompts
@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
-    # Node.js (for OpenClaw)
+    # Node.js
     nodejs \
     npm \
     # Security tools
@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js LTS (if not already latest)
+# Install Node.js LTS
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
@@ -51,11 +51,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Create application directory
 WORKDIR /agentbox
 
-# Copy package files first (for layer caching)
-COPY --chown=agentbox:agentbox package*.json ./
+# Copy agentfork source code (the core framework)
+COPY --chown=agentbox:agentbox agentfork/ /agentbox/agentfork/
 
-# Install OpenClaw globally
-RUN npm install -g openclaw@latest
+# Build and install agentbox from source
+RUN cd /agentbox/agentfork \
+    && npm install \
+    && npm run build \
+    && npm link
 
 # Copy application files
 COPY --chown=agentbox:agentbox . .
@@ -65,7 +68,7 @@ RUN mkdir -p \
     /agentbox/secrets \
     /agentbox/data \
     /agentbox/logs \
-    /agentbox/.openclaw/workspace \
+    /agentbox/.agentbox/workspace \
     && chown -R agentbox:agentbox /agentbox
 
 # Install Python dependencies (if any)
@@ -80,8 +83,8 @@ RUN chmod 700 /agentbox/secrets \
 # Switch to non-root user
 USER agentbox
 
-# Initialize OpenClaw workspace
-RUN openclaw init || true
+# Initialize AgentBox workspace
+RUN agentbox init || true
 
 # Expose port (only localhost binding recommended)
 EXPOSE 3000
@@ -96,11 +99,11 @@ VOLUME ["/agentbox/secrets", "/agentbox/data", "/agentbox/logs"]
 # Environment variables (override at runtime)
 ENV NODE_ENV=production
 ENV AGENTBOX_HOME=/agentbox
-ENV OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace
+ENV AGENTBOX_WORKSPACE=/agentbox/.agentbox/workspace
 
 # Entrypoint script
 COPY --chown=agentbox:agentbox docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["openclaw", "gateway", "start"]
+CMD ["agentbox", "gateway", "start"]

@@ -1,6 +1,6 @@
 #!/bin/bash
 # AgentBox Docker Entrypoint
-# Loads encrypted secrets and starts OpenClaw
+# Loads encrypted secrets and starts AgentBox
 
 set -e
 
@@ -36,10 +36,10 @@ fi
 
 echo ""
 
-# Initialize OpenClaw if not already done
-if [ ! -d "/agentbox/.openclaw/workspace" ]; then
-    echo "📦 Initializing OpenClaw workspace..."
-    openclaw init
+# Initialize AgentBox workspace if not already done
+if [ ! -d "/agentbox/.agentbox/workspace" ]; then
+    echo "📦 Initializing AgentBox workspace..."
+    agentbox init
     echo "✅ Workspace initialized"
     echo ""
 fi
@@ -53,7 +53,7 @@ if [ "$(id -u)" -eq 0 ] && command -v ufw &> /dev/null; then
     ufw default allow outgoing
     
     # Allow specific services (customize as needed)
-    # ufw allow 3000/tcp  # OpenClaw web UI (optional)
+    # ufw allow 3000/tcp  # AgentBox web UI (optional)
     
     # Enable firewall
     ufw --force enable
