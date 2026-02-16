@@ -39,7 +39,7 @@ echo ""
 # Initialize AgentBox workspace if not already done
 if [ ! -d "/agentbox/.agentbox/workspace" ]; then
     echo "📦 Initializing AgentBox workspace..."
-    agentbox init
+    openclaw init
     echo "✅ Workspace initialized"
     echo ""
 fi

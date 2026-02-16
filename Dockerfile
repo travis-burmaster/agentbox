@@ -73,7 +73,7 @@ RUN mkdir -p \
 
 # Install Python dependencies (if any)
 RUN if [ -f requirements.txt ]; then \
-        pip3 install --no-cache-dir -r requirements.txt; \
+    pip3 install --no-cache-dir -r requirements.txt; \
     fi
 
 # Security: Set proper permissions
@@ -84,7 +84,7 @@ RUN chmod 700 /agentbox/secrets \
 USER agentbox
 
 # Initialize AgentBox workspace
-RUN agentbox init || true
+RUN openclaw init || true
 
 # Expose port (only localhost binding recommended)
 EXPOSE 3000
@@ -106,4 +106,4 @@ COPY --chown=agentbox:agentbox docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["agentbox", "gateway", "start"]
+CMD ["openclaw", "gateway", "start"]
