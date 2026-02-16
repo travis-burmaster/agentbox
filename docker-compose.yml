@@ -6,7 +6,11 @@ services:
     image: agentbox:latest
     container_name: agentbox
     hostname: agentbox
-    
+
+    # Enable TTY for interactive commands (onboarding, configure, etc.)
+    tty: true
+    stdin_open: true
+
     # Port mapping (bind to localhost only for security)
     ports:
       - "127.0.0.1:3000:3000"
@@ -34,7 +38,7 @@ services:
       - OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
       
       # Add your API keys here (or use secrets volume):
-      # - ANTHROPIC_API_KEY=sk-ant-...
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}  # Set this in your shell or uncomment and add key directly
       # - OPENAI_API_KEY=sk-...
       # - TELEGRAM_BOT_TOKEN=...
     

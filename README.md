@@ -40,66 +40,95 @@ cd agentbox
 docker build -t agentbox:latest .
 ```
 
-#### Verify the Build
+#### Start the Container
 
 ```bash
-# Check OpenClaw version
-docker run --rm agentbox:latest openclaw --version
-# Output: 2026.2.15
+# Start with Docker Compose (recommended)
+docker-compose up -d
 
-# View available commands
-docker run --rm agentbox:latest openclaw --help
-
-# Run diagnostics
-docker run --rm agentbox:latest openclaw doctor
-```
-
-#### Using OpenClaw CLI in Docker
-
-The container includes a fully functional OpenClaw installation. You can run any OpenClaw command:
-
-```bash
-# Check system status
-docker run --rm agentbox:latest openclaw status
-
-# Run configuration wizard (interactive)
-docker run -it agentbox:latest openclaw configure
-
-# List available models
-docker run --rm agentbox:latest openclaw models list
-
-# View skills
-docker run --rm agentbox:latest openclaw skills list
-
-# Check security settings
-docker run --rm agentbox:latest openclaw security audit
-```
-
-#### Running with Persistent Storage
-
-For long-running deployments, mount volumes for data persistence:
-
-```bash
-# Create persistent volumes
+# Or with docker run
 docker run -d --name agentbox \
+  -v agentbox-config:/agentbox/.openclaw \
   -v agentbox-data:/agentbox/data \
   -v agentbox-logs:/agentbox/logs \
-  -v $(pwd)/secrets:/agentbox/secrets:ro \
   -p 127.0.0.1:3000:3000 \
   agentbox:latest
 ```
 
-#### Interactive Shell Access
+#### Run Interactive Onboarding
+
+To configure OpenClaw with API keys, models, and channels:
 
 ```bash
-# Open a shell in the container
-docker run -it --rm agentbox:latest /bin/bash
+# Method 1: Using helper script (easiest)
+./onboard.sh
 
-# Inside container, you can run:
-openclaw --version
-openclaw doctor
-openclaw configure
+# Method 2: Manual (connect to shell first, then run onboarding)
+docker exec -it agentbox /bin/bash
+# Inside container:
+openclaw onboard --install-daemon
+# Use arrow keys to navigate, Enter to confirm
+# Press Ctrl+D or type 'exit' when done
 ```
+
+**Note:** The `--install-daemon` flag is optional. It attempts to install systemd service (not available in Docker, but onboarding will complete successfully anyway).
+
+#### Verify the Build
+
+```bash
+# Check OpenClaw version
+docker exec agentbox openclaw --version
+# Output: 2026.2.15
+
+# View available commands
+docker exec agentbox openclaw --help
+
+# Run diagnostics
+docker exec agentbox openclaw doctor
+
+# Check gateway status
+docker exec agentbox openclaw status
+```
+
+#### Using OpenClaw CLI Commands
+
+Once the container is running, you can execute OpenClaw commands:
+
+```bash
+# Check system status
+docker exec agentbox openclaw status
+
+# List available models
+docker exec agentbox openclaw models list
+
+# View skills
+docker exec agentbox openclaw skills list
+
+# Check security settings
+docker exec agentbox openclaw security audit
+
+# Run diagnostics
+docker exec agentbox openclaw doctor
+```
+
+#### Interactive Shell Access
+
+For interactive commands (onboarding, configuration, etc.), connect to the container's bash shell:
+
+```bash
+# Connect to container shell
+docker exec -it agentbox /bin/bash
+
+# Inside container, you can run interactive commands:
+openclaw onboard --install-daemon    # Full onboarding wizard
+openclaw configure                   # Configuration wizard
+openclaw agent chat "Hello!"         # Interactive AI chat
+
+# Exit shell when done
+exit
+```
+
+**Tip:** Use the `./onboard.sh` helper script for easier onboarding!
 
 ### Option 2: Vagrant (Full VM - Coming Soon)
 
@@ -144,28 +173,38 @@ See [VM_SETUP.md](./docs/VM_SETUP.md) for UTM, QEMU/KVM, and VirtualBox instruct
 - **Network Isolation**: Firewall rules defined, needs runtime configuration
 - **Vagrant VM**: Configuration files in progress
 
-### 🎯 Next Steps
+### 🎯 Quick Start Workflow
 
-To run the full gateway service in Docker:
+After building and starting the container:
 
-1. **Configure OpenClaw**:
+1. **Connect to Container Shell**:
    ```bash
-   docker run -it -v agentbox-config:/agentbox/.openclaw agentbox:latest openclaw configure
+   docker exec -it agentbox /bin/bash
    ```
 
-2. **Set Gateway Mode**:
+2. **Run Onboarding** (inside container):
    ```bash
-   docker run --rm -v agentbox-config:/agentbox/.openclaw agentbox:latest \
-     openclaw config set gateway.mode local
+   openclaw onboard --install-daemon
+   ```
+   - Use arrow keys to navigate prompts
+   - Enter your Anthropic API key when prompted
+   - Configure models, tools, and channels
+   - Press Ctrl+D or type `exit` when complete
+
+3. **Test AI Chat** (after exiting container):
+   ```bash
+   docker exec agentbox openclaw agent chat "Hello! Introduce yourself."
    ```
 
-3. **Run Gateway** (when systemd-free mode is ready):
+4. **Check Status**:
    ```bash
-   docker run -d -v agentbox-config:/agentbox/.openclaw \
-     -p 127.0.0.1:3000:3000 agentbox:latest openclaw gateway start
+   docker exec agentbox openclaw status
    ```
 
-For now, you can use all CLI commands directly without the gateway daemon.
+**Alternative:** Use the helper script for automated onboarding:
+```bash
+./onboard.sh
+```
 
 ---
 
