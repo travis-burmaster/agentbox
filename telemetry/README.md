@@ -207,6 +207,20 @@ if session_cost > YOUR_THRESHOLD:
 
 ## 🔒 Security Considerations
 
+### Default Security Posture
+
+**By default, the telemetry dashboard is secure:**
+
+✅ **Localhost-only binding** - Port `127.0.0.1:8501:8501` in docker-compose.yml  
+✅ **No LAN exposure** - Not accessible from other devices on your network  
+✅ **No internet exposure** - Not reachable from the public internet  
+✅ **Read-only logs** - Dashboard cannot modify OpenClaw logs  
+
+**Access methods:**
+- ✅ Local browser on the same machine: http://localhost:8501
+- ✅ Remote access via SSH tunnel (see below)
+- ❌ Direct access from other machines (blocked by default)
+
 ### Production Deployment
 
 When exposing the dashboard externally:
@@ -235,6 +249,57 @@ When exposing the dashboard externally:
    volumes:
      - openclaw-logs:/tmp/openclaw:ro  # :ro = read-only
    ```
+
+### Remote Access (Secure)
+
+For secure remote access to the dashboard, use SSH tunnels instead of exposing ports:
+
+#### Single User Access
+
+```bash
+# From your local machine, create an SSH tunnel to the AgentBox server
+ssh -L 8501:localhost:8501 user@agentbox-server
+
+# Then access the dashboard on your local machine
+open http://localhost:8501
+```
+
+**Benefits:**
+- ✅ Encrypted connection (SSH)
+- ✅ No firewall changes needed
+- ✅ Maintains localhost-only binding
+- ✅ No exposure to LAN or internet
+
+#### Team Access
+
+For multiple team members:
+
+```bash
+# Each team member creates their own SSH tunnel
+ssh -L 8501:localhost:8501 user@agentbox-server
+```
+
+**Alternative ports if 8501 is in use:**
+```bash
+ssh -L 9501:localhost:8501 user@agentbox-server
+# Access via http://localhost:9501
+```
+
+#### Persistent Tunnel (Background)
+
+```bash
+# Run SSH tunnel in background with auto-reconnect
+ssh -fN -L 8501:localhost:8501 user@agentbox-server
+
+# Kill the tunnel when done
+pkill -f "ssh.*8501:localhost:8501"
+```
+
+**Recommended Setup:**
+1. Keep docker-compose.yml with `127.0.0.1:8501:8501` (localhost-only)
+2. Team members use SSH tunnels for access
+3. No need to expose ports or configure authentication
+4. Leverages existing SSH security (keys, 2FA, etc.)
 
 ### Sensitive Data
 
