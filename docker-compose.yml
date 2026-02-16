@@ -51,13 +51,13 @@ services:
     # Restart policy
     restart: unless-stopped
     
-    # Health check
+    # Health check (process-based since OpenClaw uses WebSocket, not HTTP /health)
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "pgrep", "-f", "openclaw-gateway"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
 # Named volumes for persistence
 volumes:

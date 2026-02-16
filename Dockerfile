@@ -89,9 +89,10 @@ RUN openclaw init || true
 # Expose port (only localhost binding recommended)
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+# Health check - Check if the gateway process is running
+# Note: OpenClaw uses WebSocket-based health checks, not HTTP /health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD pgrep -f openclaw-gateway || exit 1
 
 # Volume mounts for persistence
 VOLUME ["/agentbox/secrets", "/agentbox/data", "/agentbox/logs"]

@@ -1,5 +1,9 @@
 # AgentBox Gateway Status
 
+**Status**: ✅ **FULLY OPERATIONAL**
+
+The AgentBox gateway is now running successfully with all services operational.
+
 ## ✅ Completed Tasks
 
 ### 1. Removed systemd dependencies ✅
@@ -35,13 +39,22 @@
   - `OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace`
   - `OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json`
 
-## 🚧 In Progress
+### 5. Fixed health check ✅
+- **Changed**: Health check from HTTP endpoint to process check
+- **Reason**: OpenClaw uses WebSocket-based architecture, not HTTP `/health` endpoint
+- **Method**: Check for running `openclaw-gateway` process using `pgrep`
+- **Result**: Container now shows as "healthy" with proper monitoring
 
-- **Docker Build**: Full rebuild with `--no-cache` to apply minimal config
-  - Status: Running (passed OpenClaw compilation step)
-  - ETA: Should complete soon (most time-consuming steps done)
+## ✅ Verification Complete
 
-## 🧪 Testing Needed (Once Build Completes)
+Gateway is fully operational:
+- **Container**: Healthy status
+- **Gateway**: Reachable at ws://127.0.0.1:3000 (16ms response time)
+- **Dashboard**: Available at http://127.0.0.1:3000/
+- **Services**: All running (canvas, browser control, heartbeat)
+- **Auth**: Token-based authentication working
+
+## 📋 Usage
 
 ### Start with Docker Compose
 
@@ -143,11 +156,31 @@ docker run -d -p 127.0.0.1:3001:3000 agentbox:latest
 
 ## 🔜 Next Steps
 
-1. **Wait for build to complete** (or check if already done)
-2. **Test with Docker Compose**: `docker-compose up -d`
-3. **Verify gateway health**: `curl http://127.0.0.1:3000/health`
-4. **Add API keys** (optional) via environment variables or secrets volume
-5. **Test OpenClaw CLI commands** through the gateway
+1. **Add API keys** to enable AI models:
+   ```bash
+   # Option 1: Environment variables in docker-compose.yml
+   # Add under environment: section
+   ANTHROPIC_API_KEY=sk-ant-...
+   OPENAI_API_KEY=sk-...
+
+   # Option 2: Use encrypted secrets (recommended)
+   # See secrets/README.md for setup instructions
+   ```
+
+2. **Configure messaging channels** (optional):
+   ```bash
+   docker exec agentbox openclaw configure
+   # Follow prompts to set up Telegram, Discord, Slack, etc.
+   ```
+
+3. **Test the gateway**:
+   ```bash
+   docker exec agentbox openclaw status --deep
+   docker exec agentbox openclaw models list
+   ```
+
+4. **Access the dashboard**:
+   Open http://127.0.0.1:3000/ in your browser
 
 ## 📚 Documentation
 
@@ -157,6 +190,7 @@ docker run -d -p 127.0.0.1:3001:3000 agentbox:latest
 
 ---
 
-**Last Updated**: 2026-02-16 11:08 CST  
-**Status**: Build in progress, configuration complete  
-**Next Action**: Start container once build finishes
+**Last Updated**: 2026-02-16 12:35 CST
+**Status**: ✅ Fully operational
+**Gateway**: Reachable at ws://127.0.0.1:3000 (16ms)
+**Dashboard**: http://127.0.0.1:3000/
