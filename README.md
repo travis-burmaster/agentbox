@@ -18,6 +18,35 @@ AgentBox is a security-first AI agent framework designed for isolated VM deploym
 | **Snapshot/Rollback** | ✅ VM snapshots | ❌ N/A | ❌ N/A |
 | **Air-gap Capable** | ✅ Optional | ❌ Internet required | ❌ Cloud only |
 | **Self-Hosted** | ✅ Complete control | ⚠️ Varies | ❌ SaaS only |
+| **Telemetry Dashboard** | ✅ Real-time observability | ❌ N/A | ⚠️ Limited |
+
+## 📊 Telemetry & Observability
+
+AgentBox includes a built-in **real-time observability dashboard** for monitoring your AI agent's performance, costs, and usage:
+
+✅ **Real-time cost tracking** - Monitor API spending across all sessions and models  
+✅ **Token usage analytics** - Track input/output tokens with cache optimization insights  
+✅ **Tool usage patterns** - Identify bottlenecks and frequently used tools  
+✅ **Timeline visualization** - See agent activity over time (hourly, daily, monthly)  
+✅ **Session-level breakdowns** - Debug expensive runs and optimize workflows  
+
+### Quick Start Telemetry
+
+```bash
+# Start AgentBox with telemetry dashboard
+docker-compose up -d
+
+# Access telemetry dashboard
+open http://localhost:8501
+```
+
+The dashboard automatically discovers and monitors OpenClaw session logs. Perfect for:
+- **Cost optimization** - Track spending and identify expensive operations
+- **Performance tuning** - Analyze token usage and cache hit rates
+- **Debugging** - Review session history and tool call patterns
+- **Capacity planning** - Understand usage trends and forecast needs
+
+See **[telemetry/README.md](telemetry/README.md)** for detailed setup and configuration.
 
 ## 🚀 Quick Start
 

@@ -26,6 +26,9 @@ services:
       # Logs (append-only, can be mounted read-only on host)
       - agentbox-logs:/agentbox/logs
       
+      # OpenClaw telemetry logs (shared with telemetry service)
+      - openclaw-logs:/tmp/openclaw
+      
       # Encrypted secrets (mount as read-only)
       # Uncomment and configure secrets/ directory first:
       # - ./secrets:/agentbox/secrets:ro
@@ -63,6 +66,47 @@ services:
       retries: 3
       start_period: 15s
 
+  # Telemetry Dashboard (Optional - for observability)
+  telemetry:
+    build: ./telemetry
+    image: agentbox-telemetry:latest
+    container_name: agentbox-telemetry
+    hostname: telemetry
+    
+    # Port mapping (bind to localhost only)
+    ports:
+      - "127.0.0.1:8501:8501"
+    
+    # Mount OpenClaw logs as read-only
+    volumes:
+      - openclaw-logs:/tmp/openclaw:ro
+      - agentbox-logs:/agentbox/logs:ro
+    
+    # Resource limits (lightweight Streamlit app)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Depends on agentbox (starts after agentbox)
+    depends_on:
+      - agentbox
+
 # Named volumes for persistence
 volumes:
   agentbox-config:
@@ -70,4 +114,6 @@ volumes:
   agentbox-data:
     driver: local
   agentbox-logs:
+    driver: local
+  openclaw-logs:
     driver: local
