@@ -1,3 +1,4 @@
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -304,18 +305,6 @@ openclaw config get
 - The CLI is named `openclaw`, not `agentbox`
 - Correct: `docker run --rm agentbox:latest openclaw --version`
 - Wrong: `docker run --rm agentbox:latest agentbox --version`
-
-### Container shows as "unhealthy"
-- Older versions used HTTP `/health` endpoint which doesn't exist in OpenClaw
-- Fixed in current version: Uses process-based health check (`pgrep openclaw-gateway`)
-- The gateway uses WebSocket protocol, not HTTP, so curl-based health checks fail
-- Check actual status with: `docker exec agentbox openclaw status`
-
-### "unauthorized: device token mismatch"
-- This is normal for fresh installs without configuration
-- The gateway generates auth tokens automatically on first run
-- Not a critical error - gateway is still functional
-- Configure properly with: `docker exec agentbox openclaw configure`
 
 ## Resources
 
