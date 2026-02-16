@@ -312,7 +312,7 @@ zgrep "session_access" /var/log/audit/*.gz | grep -v "user:agentbox"
 
 Instead:
 1. Use GitHub Security Advisories (private disclosure)
-2. Or email: security@[domain] (GPG key: [fingerprint])
+2. Or email: travis@burmaster.com
 
 We aim to respond within 48 hours and patch critical issues within 7 days.
 
@@ -325,5 +325,5 @@ We aim to respond within 48 hours and patch critical issues within 7 days.
 
 ---
 
-**Last Updated:** 2026-02-15  
+**Last Updated:** 2026-02-16  
 **Version:** 0.1.0-alpha
