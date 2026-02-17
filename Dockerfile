@@ -87,7 +87,8 @@ USER agentbox
 RUN openclaw init || true
 
 # Expose port (only localhost binding recommended)
-EXPOSE 3000
+# 18789 is OpenClaw's default gateway port
+EXPOSE 18789
 
 # Health check - Check if the gateway process is running
 # Note: OpenClaw uses WebSocket-based health checks, not HTTP /health endpoint

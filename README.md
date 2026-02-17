@@ -82,7 +82,7 @@ docker run -d --name agentbox \
   -v agentbox-config:/agentbox/.openclaw \
   -v agentbox-data:/agentbox/data \
   -v agentbox-logs:/agentbox/logs \
-  -p 127.0.0.1:3000:3000 \
+  -p 127.0.0.1:18789:18789 \
   agentbox:latest
 ```
 
