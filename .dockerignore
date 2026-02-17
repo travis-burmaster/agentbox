@@ -1,0 +1,26 @@
+# AgentBox .dockerignore
+# Keeps the build context lean and avoids copying dev/source artifacts
+
+# Source tree used for local development only — OpenClaw is installed from npm
+agentfork/
+
+# Git history
+.git/
+.gitignore
+
+# Secrets (never bake into image — mount at runtime)
+secrets/*.key
+secrets/*.env
+!secrets/README.md
+
+# Documentation / dev files not needed at runtime
+*.md
+!config/
+assets/
+telemetry/
+
+# Misc
+.DS_Store
+*.log
+*.tmp
+node_modules/

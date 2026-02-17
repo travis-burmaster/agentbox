@@ -1,114 +1,169 @@
 version: '3.8'
 
+# ─── AgentBox Docker Compose ─────────────────────────────────────────────────
+# Security-hardened configuration.
+# See SECURITY.md and UPGRADE.md for operational guidance.
+#
+# Quick start:
+#   ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
+#
+# To rebuild with a specific OpenClaw version:
+#   OPENCLAW_VERSION=2026.X.Y docker compose build
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
   agentbox:
-    build: .
+    build:
+      context: .
+      args:
+        # Pin the OpenClaw version at build time. Override to test a new release:
+        #   OPENCLAW_VERSION=2026.X.Y docker compose build
+        # See UPGRADE.md before bumping.
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.2.15}
     image: agentbox:latest
     container_name: agentbox
     hostname: agentbox
 
-    # Enable TTY for interactive commands (onboarding, configure, etc.)
-    tty: true
-    stdin_open: true
+    # ── Runtime security hardening ──────────────────────────────────────────
+    security_opt:
+      - no-new-privileges:true   # Prevents setuid/setgid escalation
+      - seccomp=unconfined       # Replace with a custom seccomp profile in production
 
-    # Port mapping (bind to localhost only for security)
+    # Drop ALL Linux capabilities; add back only what openclaw actually needs.
+    # openclaw-gateway binds to port 3000 (>1024) so NET_BIND_SERVICE not needed.
+    cap_drop:
+      - ALL
+
+    # Read-only root filesystem. Writable paths are mounted as tmpfs or volumes.
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=256M
+      - /run:noexec,nosuid,nodev,size=64M
+      - /var/run/supervisor:noexec,nosuid,nodev,size=16M
+
+    # ── Network ─────────────────────────────────────────────────────────────
+    # Bind ONLY to localhost — never expose to 0.0.0.0
     ports:
       - "127.0.0.1:3000:3000"
-    
-    # Persistent volumes
+
+    networks:
+      - agentbox-net
+
+    # ── Volumes ─────────────────────────────────────────────────────────────
     volumes:
-      # Config and state (persistent across restarts)
+      # Config and session state (read-write, persisted)
       - agentbox-config:/agentbox/.openclaw
-      
-      # Data directory (databases, caches, etc.)
+
+      # Data directory (databases, caches)
       - agentbox-data:/agentbox/data
-      
-      # Logs (append-only, can be mounted read-only on host)
+
+      # Logs — mount read-only on host if shipping elsewhere
       - agentbox-logs:/agentbox/logs
-      
+
       # OpenClaw telemetry logs (shared with telemetry service)
       - openclaw-logs:/tmp/openclaw
-      
-      # Encrypted secrets (mount as read-only)
-      # Uncomment and configure secrets/ directory first:
+
+      # Encrypted secrets — ALWAYS read-only in the container.
+      # Uncomment after running: age-keygen -o secrets/agent.key
       # - ./secrets:/agentbox/secrets:ro
-    
-    # Environment variables
+
+    # ── Environment variables ────────────────────────────────────────────────
     environment:
       - NODE_ENV=production
       - OPENCLAW_HOME=/agentbox/.openclaw
       - OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace
       - OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
-      
-      # Add your API keys here (or use secrets volume):
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}  # Set this in your shell or uncomment and add key directly
-      # - OPENAI_API_KEY=sk-...
-      # - TELEGRAM_BOT_TOKEN=...
-    
-    # Resource limits (adjust as needed)
+
+      # Pass API keys from your host shell environment (never hardcode here).
+      # Usage: export ANTHROPIC_API_KEY=sk-ant-... && docker compose up -d
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+
+    # ── Resource limits ──────────────────────────────────────────────────────
+    # Prevents runaway agent from exhausting host resources.
     deploy:
       resources:
         limits:
           cpus: '2'
           memory: 4G
         reservations:
-          cpus: '1'
-          memory: 2G
-    
-    # Restart policy
+          cpus: '0.5'
+          memory: 512M
+
+    # ── Reliability ─────────────────────────────────────────────────────────
     restart: unless-stopped
-    
-    # Health check (process-based since OpenClaw uses WebSocket, not HTTP /health)
+
     healthcheck:
       test: ["CMD", "pgrep", "-f", "openclaw-gateway"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 20s
 
-  # Telemetry Dashboard (Optional - for observability)
+    # ── TTY (needed for interactive onboarding) ──────────────────────────────
+    tty: true
+    stdin_open: true
+
+  # ── Telemetry Dashboard (optional) ────────────────────────────────────────
   telemetry:
     build: ./telemetry
     image: agentbox-telemetry:latest
     container_name: agentbox-telemetry
     hostname: telemetry
 
-    # Port mapping (bind to localhost only)
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=128M
+
     ports:
       - "127.0.0.1:8501:8501"
 
-    # Mount OpenClaw data as read-only
+    networks:
+      - agentbox-net
+
+    # All mounts read-only — telemetry never writes to agent data
     volumes:
       - openclaw-logs:/tmp/openclaw:ro
       - agentbox-logs:/agentbox/logs:ro
-      - agentbox-config:/root/.openclaw:ro  # Share config (includes sessions)
-    
-    # Resource limits (lightweight Streamlit app)
+      - agentbox-config:/root/.openclaw:ro
+
     deploy:
       resources:
         limits:
           cpus: '1'
           memory: 1G
         reservations:
-          cpus: '0.5'
-          memory: 512M
-    
-    # Restart policy
+          cpus: '0.25'
+          memory: 256M
+
     restart: unless-stopped
-    
-    # Health check
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-    
-    # Depends on agentbox (starts after agentbox)
+      start_period: 15s
+
     depends_on:
       - agentbox
 
-# Named volumes for persistence
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  agentbox-net:
+    driver: bridge
+    # Set internal: true to fully air-gap (blocks all internet access).
+    # Only do this if you're using encrypted secrets pre-loaded at startup.
+    internal: false
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
   agentbox-config:
     driver: local

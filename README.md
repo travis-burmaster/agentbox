@@ -67,7 +67,8 @@ See **[telemetry/README.md](telemetry/README.md)** for detailed setup and config
 git clone https://github.com/travis-burmaster/agentbox.git
 cd agentbox
 
-# Build the Docker image (takes 5-10 minutes)
+# Build the Docker image (takes 3-5 minutes)
+# OpenClaw is installed from npm — no local source build required
 docker build -t agentbox:latest .
 ```
 
@@ -351,17 +352,18 @@ secrets/
 
 ```
 agentbox/
-├── Dockerfile              # ✅ Docker container config (working)
+├── Dockerfile              # ✅ Docker container config
 ├── docker-entrypoint.sh    # ✅ Container startup script with secrets loading
-├── agentfork/              # ✅ Core OpenClaw framework (built from source)
-│   ├── src/               # OpenClaw source code
-│   ├── dist/              # Compiled JavaScript
-│   ├── package.json       # Node.js dependencies
-│   └── openclaw.mjs       # CLI entry point
+├── docker-compose.yml      # ✅ Compose config (agentbox + telemetry)
+├── supervisord.conf        # ✅ Process supervisor (runs gateway in container)
+├── config/
+│   └── openclaw.json      # ✅ Default OpenClaw config
 ├── scripts/
-│   └── (coming soon)      # Helper scripts for secrets, backup, hardening
+│   ├── load-secrets.sh    # Helper: decrypt and load age-encrypted secrets
+│   └── rotate-keys.sh     # Helper: rotate age encryption keys
 ├── secrets/
 │   └── (template)         # Encrypted secrets management templates
+├── telemetry/             # ✅ Streamlit observability dashboard
 ├── security/
 │   └── (coming soon)      # Firewall rules, SELinux, AppArmor profiles
 ├── vm-configs/            # (coming soon)
@@ -385,9 +387,9 @@ The Docker image includes:
 
 ### Image Size
 
-- **Compressed**: ~1.5 GB
-- **Uncompressed**: ~4.4 GB
-- **Build time**: 5-10 minutes (with caching)
+- **Compressed**: ~800 MB
+- **Uncompressed**: ~2.5 GB
+- **Build time**: 3-5 minutes (with caching)
 
 ## 🔧 Configuration
 
@@ -555,14 +557,14 @@ AgentBox was inspired by and builds upon [OpenClaw](https://github.com/openclaw/
 
 ### Docker Build Issues
 
-**Problem**: Build fails with "could not resolve module" errors
+**Problem**: Build fails with module resolution errors
 
-**Solution**: Ensure you have the latest OpenClaw source files:
+**Solution**: Try a clean build (clears cached layers):
 ```bash
-# The repository includes all necessary source files
-# If you encounter missing modules, try a clean build:
 docker build --no-cache -t agentbox:latest .
 ```
+
+OpenClaw is installed directly from npm during the build — no local source compilation required. If you see npm network errors, check your internet connection and try again.
 
 **Problem**: Build takes too long or runs out of memory
 
