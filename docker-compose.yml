@@ -1,5 +1,3 @@
-version: '3.8'
-
 # ─── AgentBox Docker Compose ─────────────────────────────────────────────────
 # Security-hardened configuration.
 # See SECURITY.md and UPGRADE.md for operational guidance.
