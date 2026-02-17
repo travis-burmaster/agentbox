@@ -15,6 +15,7 @@ from pathlib import Path
 import json
 import traceback
 import os
+from streamlit_autorefresh import st_autorefresh
 
 # Try to import bmasterai
 try:
@@ -67,15 +68,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource
+@st.cache_resource(ttl=30)
 def get_dashboard_instance(db_path: str = "openclaw_telemetry.db"):
-    """Create or retrieve cached dashboard instance with proper error handling"""
+    """Create or retrieve cached dashboard instance — TTL=30s forces re-init on refresh"""
     try:
         return OpenClawDashboard(db_path)
     except Exception as e:
         st.error(f"Failed to initialize dashboard: {e}")
         traceback.print_exc()
-        # Return a minimal dashboard instance that won't crash
         return OpenClawDashboard(db_path, skip_parser=True)
 
 
@@ -109,16 +109,15 @@ class OpenClawDashboard:
                 self.parser_error = f"Parser initialization failed: {e}"
                 traceback.print_exc()
     
-    def ensure_metrics_populated(self):
-        """Ensure bmasterai metrics are populated (lazy load on first access)"""
-        if self.parser and not self.metrics_populated:
+    def ensure_metrics_populated(self, force: bool = False):
+        """Ensure bmasterai metrics are populated. Pass force=True to re-scan."""
+        if self.parser and (not self.metrics_populated or force):
             try:
-                # Scan sessions to populate in-memory metrics
                 self.parser.scan_all_sessions()
                 self.metrics_populated = True
             except Exception as e:
                 st.warning(f"Failed to populate metrics: {e}")
-                self.metrics_populated = True  # Don't retry
+                self.metrics_populated = True  # Don't retry on error
     
     def get_connection(self):
         """Create database connection with error handling"""
@@ -542,23 +541,22 @@ def main():
         }[x]
     )
     
-    # Auto-refresh with safety limits
-    auto_refresh = st.sidebar.checkbox("Auto-refresh (30s)", value=False)
-    
-    # Prevent infinite refresh loops
+    # Auto-refresh using streamlit-autorefresh (proper server-side trigger)
+    auto_refresh = st.sidebar.checkbox("Auto-refresh", value=True)
+    refresh_interval = st.sidebar.selectbox(
+        "Refresh interval",
+        [10, 30, 60, 120],
+        index=1,
+        format_func=lambda x: f"{x}s"
+    )
+
     if auto_refresh:
-        if 'last_refresh' not in st.session_state:
-            st.session_state.last_refresh = time.time()
-        
-        time_since_refresh = time.time() - st.session_state.last_refresh
-        if time_since_refresh >= 30:
-            st.session_state.last_refresh = time.time()
-            time.sleep(1)  # Small delay to prevent rapid loops
-            st.rerun()
-    
+        count = st_autorefresh(interval=refresh_interval * 1000, key="telemetry_autorefresh")
+        st.sidebar.caption(f"🔄 Refresh #{count} — every {refresh_interval}s")
+
     # Manual refresh button
     if st.sidebar.button("🔄 Refresh Now"):
-        st.session_state.last_refresh = time.time()
+        st.cache_resource.clear()
         st.rerun()
     
     # BMasterAI status
@@ -569,9 +567,12 @@ def main():
     else:
         st.sidebar.warning("⚠️ BMasterAI Not Available")
     
-    # Initialize dashboard (cached for performance)
+    # Initialize dashboard (TTL=30s cache, re-scans sessions on each cycle)
     try:
         dashboard = get_dashboard_instance()
+        # Re-scan sessions so new data appears after each auto-refresh cycle
+        if dashboard.parser:
+            dashboard.ensure_metrics_populated(force=True)
     except Exception as e:
         st.error(f"Failed to initialize dashboard: {e}")
         st.stop()

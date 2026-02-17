@@ -30,6 +30,8 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    # Process supervisor (replaces systemctl for container-native service management)
+    supervisor \
     # Security tools
     age \
     ufw \
@@ -90,10 +92,9 @@ RUN openclaw init || true
 # 3000 is OpenClaw's default gateway port
 EXPOSE 3000
 
-# Health check - Check if the gateway process is running
-# Note: OpenClaw uses WebSocket-based health checks, not HTTP /health endpoint
+# Health check via supervisorctl
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD pgrep -f openclaw-gateway || exit 1
+    CMD supervisorctl -c /etc/supervisor/conf.d/agentbox.conf status openclaw-gateway | grep -q RUNNING || exit 1
 
 # Volume mounts for persistence
 VOLUME ["/agentbox/secrets", "/agentbox/data", "/agentbox/logs"]
@@ -111,5 +112,10 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Copy default config
 COPY --chown=agentbox:agentbox config/openclaw.json /agentbox/.openclaw/openclaw.json
 
+# Copy supervisord config
+COPY --chown=agentbox:agentbox supervisord.conf /etc/supervisor/conf.d/agentbox.conf
+
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["openclaw", "gateway", "run"]
+# supervisord manages openclaw gateway (and optionally telemetry)
+# Use `supervisorctl restart openclaw-gateway` instead of `openclaw gateway restart`
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/agentbox.conf"]
