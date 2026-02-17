@@ -77,7 +77,6 @@ sessions/
 *.img
 
 # Docker
-.dockerignore
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # IDE / Editors
