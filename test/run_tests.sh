@@ -39,7 +39,7 @@ echo "Clean slate."
 
 section "Build"
 echo "Building images..."
-docker compose -f docker-compose.yml --project-name agentbox_test build --no-cache 2>&1 | \
+docker compose -f docker-compose.yml --project-name agentbox_test build 2>&1 | \
   grep -E "DONE|ERROR|Security gate|warn deprecated|#[0-9]+ DONE" | tail -20
 
 if docker images agentbox:latest --format "{{.ID}}" | grep -q .; then
