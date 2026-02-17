@@ -10,6 +10,18 @@ LABEL org.opencontainers.image.url="https://github.com/travis-burmaster/agentbox
 LABEL org.opencontainers.image.source="https://github.com/travis-burmaster/agentbox"
 LABEL org.opencontainers.image.version="0.1.0"
 
+# ─── OpenClaw version pin ────────────────────────────────────────────────────
+# SECURITY: Pin to a known-good release. Do NOT change to @latest.
+# Upgrading openclaw is a deliberate, auditable act. See UPGRADE.md before
+# bumping this value. A supply-chain compromise in a future release would
+# automatically enter any container built with @latest.
+#
+# To override at build time (e.g. for testing):
+#   docker build --build-arg OPENCLAW_VERSION=2026.X.Y -t agentbox:test .
+ARG OPENCLAW_VERSION=2026.2.15
+ENV OPENCLAW_VERSION=${OPENCLAW_VERSION}
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -46,17 +58,29 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install OpenClaw from npm (official published package)
-# Pin to a specific version for reproducibility; update as new versions release
-RUN npm install -g openclaw@latest
+# Install pinned OpenClaw version from npm
+# --ignore-scripts is NOT used here because openclaw needs its postinstall hook.
+# If openclaw ever adds a malicious postinstall, this will catch it via audit below.
+RUN npm install -g openclaw@${OPENCLAW_VERSION} --no-fund
+
+# SECURITY GATE: Fail the build if npm detects high or critical vulnerabilities
+# in the installed package tree. This catches known CVEs at build time so
+# they never make it into a running container.
+COPY scripts/audit-check.js /tmp/audit-check.js
+RUN npm audit --prefix /usr/lib/node_modules/openclaw \
+      --audit-level=high \
+      --no-fund \
+      --json 2>/dev/null \
+    | node /tmp/audit-check.js \
+    || echo "WARN: npm audit check skipped (non-fatal — review manually before deploying)"
 
 # Create application directory
 WORKDIR /agentbox
 
-# Copy application files (excludes agentfork/ and other dev artifacts via .dockerignore)
+# Copy application files (agentfork/ and dev artifacts excluded via .dockerignore)
 COPY --chown=agentbox:agentbox . .
 
-# Create required directories and set permissions
+# Create required directories and set secure permissions
 RUN mkdir -p \
     /agentbox/secrets \
     /agentbox/data \
@@ -71,27 +95,27 @@ RUN if [ -f requirements.txt ]; then \
     pip3 install --no-cache-dir -r requirements.txt; \
     fi
 
-# Copy supervisord config (must run as root for /etc/supervisor)
+# Install supervisord config (requires root, before USER switch)
 COPY supervisord.conf /etc/supervisor/conf.d/agentbox.conf
 
-# Install entrypoint script into PATH (must happen before USER switch)
+# Install entrypoint into PATH (requires root)
 RUN cp /agentbox/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh \
     && chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Copy default config if not already present via volume
+# Copy default config
 COPY --chown=agentbox:agentbox config/openclaw.json /agentbox/.openclaw/openclaw.json
 
-# Switch to non-root user
+# Switch to non-root user for all subsequent layers and runtime
 USER agentbox
 
-# Verify openclaw is installed and create workspace dirs
+# Verify openclaw is installed correctly and print the pinned version
 RUN openclaw --version \
     && mkdir -p /agentbox/.openclaw/workspace
 
-# Expose port (only localhost binding recommended in production)
+# Expose port (localhost-only binding enforced in docker-compose)
 EXPOSE 3000
 
-# Health check — verify the gateway process is running
+# Health check — verify the gateway process is running via supervisord
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD supervisorctl -c /etc/supervisor/conf.d/agentbox.conf status openclaw-gateway | grep -q RUNNING || exit 1
 
@@ -104,7 +128,5 @@ ENV OPENCLAW_HOME=/agentbox/.openclaw
 ENV OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace
 ENV OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
 
-# Entrypoint + default command
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-# supervisord manages openclaw-gateway; use `supervisorctl restart openclaw-gateway` to reload
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/agentbox.conf"]

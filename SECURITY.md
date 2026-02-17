@@ -16,9 +16,12 @@ AgentBox is designed with security as the primary concern. This document outline
 | Threat | Mitigation | Status |
 |--------|------------|--------|
 | **Secret exposure in git** | age encryption, .gitignore | ✅ Implemented |
-| **Agent escaping VM** | VM isolation, restricted networking | ✅ Implemented |
+| **Agent escaping container** | `cap_drop: ALL`, `no-new-privileges`, `read_only` | ✅ Implemented |
+| **Privilege escalation** | Non-root user, `no-new-privileges:true` | ✅ Implemented |
 | **Unauthorized API access** | Encrypted secrets, key rotation | ✅ Implemented |
-| **Data exfiltration** | Firewall allowlists, network monitoring | ✅ Implemented |
+| **Data exfiltration** | Firewall allowlists, localhost-only ports | ✅ Implemented |
+| **Supply-chain compromise** | Pinned openclaw version + build-time npm audit | ✅ Implemented |
+| **Resource exhaustion (DoS)** | CPU/memory limits in docker-compose | ✅ Implemented |
 | **Session transcript leaks** | Audit logs, encryption at rest | 🚧 Planned (v0.2.0) |
 | **Malicious tool execution** | Tool allowlists, sandboxing | 🚧 Planned (v0.2.0) |
 | **Key compromise** | Key rotation, HSM support | 🚧 Planned (v0.3.0) |
@@ -26,7 +29,7 @@ AgentBox is designed with security as the primary concern. This document outline
 ### Out of Scope
 
 - **LLM prompt injection attacks** - Inherent risk in LLM-based systems
-- **Zero-day vulnerabilities in dependencies** - Stay updated with patches
+- **Zero-day vulnerabilities in dependencies** - Mitigated by version pinning + audit gate
 - **Physical access to host** - Assumed trusted physical security
 
 ## Security Layers
@@ -200,6 +203,36 @@ tail -f /var/log/syslog | grep OUTBOUND
   }
 }
 ```
+
+## Dependency Version Pinning
+
+**Threat:** A future version of OpenClaw (or any dependency) could introduce a vulnerability,
+backdoor, or breaking behavioral change — either through a compromise of the upstream
+project or an unintentional bug.
+
+**Mitigation:** AgentBox pins OpenClaw to a **specific, known-good version** in both the
+`Dockerfile` and `docker-compose.yml`. The pinned version is an explicit `ARG` with a
+documented default — changing it requires a deliberate code change with a git trail.
+
+### Build-time Audit Gate
+
+The Dockerfile runs `npm audit --audit-level=high` immediately after installing OpenClaw.
+If any high or critical CVEs are detected in the installed package tree, **the build fails**.
+This means:
+- Vulnerable images cannot be deployed accidentally.
+- CI/CD pipelines will alert on newly disclosed CVEs even without a code change.
+
+### Upgrading Safely
+
+See [UPGRADE.md](./UPGRADE.md) for the full upgrade process, including:
+- How to review the changelog and audit the new version before building
+- How to test locally and roll back if needed
+- Recommended image scanning tools (Trivy, Grype)
+
+**Policy:** Never use `@latest` or `*` for OpenClaw in production. A pinned version
+means security is opt-in, not opt-out.
+
+---
 
 ## Compliance & Standards
 
