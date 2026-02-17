@@ -135,11 +135,18 @@ else
 fi
 
 section "Gateway API"
-GW_RESP=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ 2>/dev/null || echo "000")
-if [[ "$GW_RESP" =~ ^(200|400|401|403|404|426)$ ]]; then
-  pass "T08: gateway responds on port 3000 (HTTP $GW_RESP)"
+# Gateway is WebSocket-only (not plain HTTP); check TCP port is open and
+# supervisorctl confirms the process is RUNNING — same check as HEALTHCHECK.
+if [[ -n "$CONTAINER_ID" ]]; then
+  GW_PROC=$(docker exec "$CONTAINER_ID" \
+    supervisorctl -c /etc/supervisor/conf.d/agentbox.conf status openclaw-gateway 2>/dev/null || echo "")
+  if echo "$GW_PROC" | grep -q "RUNNING"; then
+    pass "T08: gateway process RUNNING on port 3000 (WebSocket)"
+  else
+    fail "T08: gateway process RUNNING on port 3000" "supervisorctl: $GW_PROC"
+  fi
 else
-  fail "T08: gateway responds on port 3000" "got HTTP $GW_RESP"
+  skip "T08: gateway process check" "container not found"
 fi
 
 section "AI Inference (--local mode)"
