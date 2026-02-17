@@ -69,9 +69,8 @@ services:
 
     # ── Environment variables ────────────────────────────────────────────────
     environment:
+      - HOME=/agentbox
       - NODE_ENV=production
-      - OPENCLAW_HOME=/agentbox/.openclaw
-      - OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace
       - OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
 
       # Pass API keys from your host shell environment (never hardcode here).
@@ -129,10 +128,11 @@ services:
       - agentbox-net
 
     # All mounts read-only — telemetry never writes to agent data
+    # agentbox-config mounts at /data/openclaw so sessions are at /data/openclaw/agents/main/sessions
     volumes:
       - openclaw-logs:/tmp/openclaw:ro
       - agentbox-logs:/agentbox/logs:ro
-      - agentbox-config:/root/.openclaw:ro
+      - agentbox-config:/data/openclaw:ro
 
     deploy:
       resources:
@@ -142,6 +142,9 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
+
+    environment:
+      - OPENCLAW_SESSIONS_DIR=/data/openclaw/agents/main/sessions
 
     restart: unless-stopped
 

@@ -26,7 +26,9 @@ ENV OPENCLAW_VERSION=${OPENCLAW_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Security: Run as non-root user
-RUN useradd -m -s /bin/bash -u 1000 agentbox
+# Set home to /agentbox so openclaw resolves ~/.openclaw → /agentbox/.openclaw
+# (openclaw uses $HOME internally, not OPENCLAW_HOME)
+RUN useradd -m -s /bin/bash -d /agentbox -u 1000 agentbox
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -123,9 +125,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
 VOLUME ["/agentbox/secrets", "/agentbox/data", "/agentbox/logs"]
 
 # Runtime environment
+# HOME=/agentbox means openclaw resolves ~/.openclaw → /agentbox/.openclaw automatically
+ENV HOME=/agentbox
 ENV NODE_ENV=production
-ENV OPENCLAW_HOME=/agentbox/.openclaw
-ENV OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace
 ENV OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
