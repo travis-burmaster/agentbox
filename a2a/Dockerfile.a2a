@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY a2a/requirements.txt /app/a2a/requirements.txt
+RUN pip install --no-cache-dir -r /app/a2a/requirements.txt
+
+COPY a2a /app/a2a
+
+EXPOSE 8080
+
+ENV AGENTBOX_GATEWAY_URL=http://localhost:3000
+ENV GOOGLE_CLOUD_PROJECT=
+
+CMD ["uvicorn", "a2a.server:app", "--host", "0.0.0.0", "--port", "8080"]

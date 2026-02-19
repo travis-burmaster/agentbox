@@ -1,0 +1,35 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - a2a/Dockerfile.a2a
+      - -t
+      - gcr.io/$PROJECT_ID/agentbox-a2a:$COMMIT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/agentbox-a2a:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - agentbox-a2a
+      - --image
+      - gcr.io/$PROJECT_ID/agentbox-a2a:$COMMIT_SHA
+      - --region
+      - us-central1
+      - --platform
+      - managed
+      - --no-allow-unauthenticated
+      - --service-account
+      - agentbox-a2a@$PROJECT_ID.iam.gserviceaccount.com
+      - --set-env-vars
+      - AGENTBOX_GATEWAY_URL=http://localhost:3000,GOOGLE_CLOUD_PROJECT=$PROJECT_ID
+
+images:
+  - gcr.io/$PROJECT_ID/agentbox-a2a:$COMMIT_SHA

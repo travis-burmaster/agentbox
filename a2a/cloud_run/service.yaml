@@ -1,0 +1,34 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: agentbox-a2a
+  annotations:
+    run.googleapis.com/ingress: internal
+    run.googleapis.com/invoker-iam-disabled: "false"
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 10
+      timeoutSeconds: 3300
+      containers:
+        - image: gcr.io/PROJECT_ID/agentbox-a2a:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: AGENTBOX_GATEWAY_URL
+              value: http://localhost:3000
+            - name: GOOGLE_CLOUD_PROJECT
+              value: PROJECT_ID
+            - name: EXPECTED_AUDIENCE
+              value: https://agentbox-a2a-PLACEHOLDER-uc.a.run.app
+            - name: EXPECTED_CALLER_SA
+              value: gemini-enterprise-caller@PROJECT_ID.iam.gserviceaccount.com
