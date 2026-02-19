@@ -1,214 +1,394 @@
-# AgentBox A2A Wrapper for Gemini Enterprise
+# AgentBox A2A — Cloud Run + Gemini Enterprise
 
-This directory provides an A2A (Agent-to-Agent protocol) HTTP layer so Gemini Enterprise can call AgentBox as a sub-agent on Cloud Run.
+Deploy AgentBox as a Gemini Enterprise sub-agent on Google Cloud Run using the
+[Agent-to-Agent (A2A) protocol](https://a2a-protocol.org/latest/).  
+**Humans never reach OpenClaw directly — all access flows through Gemini Enterprise over A2A.**
+
+---
 
 ## Architecture
 
-```text
-+-------------------------------+
-| Gemini Enterprise             |
-| (Agent Gallery + Orchestrator)|
-+---------------+---------------+
-                |
-                | A2A JSON-RPC over HTTPS + IAM identity token
-                v
-+---------------+---------------+
-| Cloud Run: agentbox-a2a       |
-| FastAPI A2A wrapper           |
-| - /.well-known/agent.json     |
-| - POST /  (tasks/send,get)    |
-| - IAM token validation         |
-+---------------+---------------+
-                |
-                | Local bridge (CLI or gateway)
-                v
-+---------------+---------------+
-| AgentBox / OpenClaw runtime   |
-| - openclaw system event       |
-| - optional gateway on :3000   |
-+-------------------------------+
+```
+┌──────────────────────────────────┐
+│  Gemini Enterprise               │
+│  (Agent Gallery + Orchestrator)  │
+└────────────────┬─────────────────┘
+                 │  HTTPS  A2A JSON-RPC
+                 │  IAM identity token (Bearer)
+                 ▼
+┌──────────────────────────────────┐
+│  Cloud Run: agentbox-a2a         │  ← this directory
+│  FastAPI A2A wrapper             │
+│  ● GET  /.well-known/agent.json  │
+│  ● POST /  (tasks/send, get)     │
+│  ● IAM token validation (2-layer)│
+└────────────────┬─────────────────┘
+                 │  localhost (CLI or gateway REST)
+                 ▼
+┌──────────────────────────────────┐
+│  AgentBox / OpenClaw runtime     │
+│  openclaw system event --text …  │
+└──────────────────────────────────┘
 ```
 
-## How A2A works here
+**Security: two-layer lock**
+1. **Cloud Run IAM** — `--no-allow-unauthenticated`; only Gemini Enterprise SA has `roles/run.invoker`
+2. **App-level** — server checks Bearer token is Google-signed AND `token.email == EXPECTED_CALLER_SA`
 
-1. Gemini Enterprise discovers the agent card at `/.well-known/agent.json`.
-2. Gemini sends A2A JSON-RPC requests to `POST /`.
-3. Wrapper validates IAM Bearer token (Google-signed identity token).
-4. Wrapper translates task text to OpenClaw invocation.
-5. Wrapper returns A2A artifact response (`tasks/send`) or status lookup behavior (`tasks/get`).
-
-Supported methods:
-- `tasks/send`
-- `tasks/get` (stateless wrapper; returns not-found for prior tasks)
-
-## Files
-
-- `server.py`: FastAPI A2A server.
-- `agent_card.json`: Agent descriptor consumed by Gemini.
-- `requirements.txt`: Python deps.
-- `Dockerfile.a2a`: standalone container image.
-- `cloud_run/service.yaml`: service manifest template.
-- `cloud_run/cloudbuild.yaml`: build + deploy pipeline.
-- `cloud_run/setup.sh`: one-shot bootstrap script.
+---
 
 ## Prerequisites
 
-- Google Cloud project with billing enabled.
-- Gemini Enterprise entitlement/license.
-- `gcloud` CLI authenticated and configured.
-- Cloud Run, Cloud Build, Secret Manager APIs enabled.
-- Existing AgentBox/OpenClaw runtime design for request execution.
-
-## Deploy step-by-step
-
-1. Set project and region:
+| Tool | Install |
+|------|---------|
+| `gcloud` CLI | https://cloud.google.com/sdk/docs/install |
+| `docker` | https://docs.docker.com/get-docker/ |
+| `jq` | `sudo apt-get install jq` / `brew install jq` |
+| GCP project with billing | console.cloud.google.com |
+| Gemini Enterprise license | Required to register the agent in Agent Gallery |
 
 ```bash
-gcloud config set project YOUR_PROJECT_ID
-export PROJECT_ID="YOUR_PROJECT_ID"
-export REGION="us-central1"
+# Verify tools
+gcloud version
+docker version
+jq --version
 ```
 
-2. Build and deploy with Cloud Build:
+---
+
+## Step 0 — Clone and set variables
+
+Open a VS Code terminal (`Ctrl+`` ` on Windows/Linux, `Cmd+`` ` on Mac) and run:
 
 ```bash
-gcloud builds submit --config a2a/cloud_run/cloudbuild.yaml .
+# Clone (if you haven't already)
+git clone https://github.com/travis-burmaster/agentbox.git
+cd agentbox
+git checkout feat/a2a-cloud-run
+
+# ── Set these once; all commands below use them ───────────────────────────────
+export PROJECT_ID="YOUR_PROJECT_ID"           # e.g. my-gcp-project-123
+export REGION="us-central1"                   # Cloud Run region
+export SERVICE_NAME="agentbox-a2a"
+export A2A_SA="${SERVICE_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# Authenticate
+gcloud auth login
+gcloud config set project "${PROJECT_ID}"
+gcloud auth application-default login
 ```
 
-3. Capture Cloud Run URL:
+---
+
+## Step 1 — Enable GCP APIs
 
 ```bash
-SERVICE_URL="$(gcloud run services describe agentbox-a2a --region ${REGION} --format='value(status.url)')"
-echo "$SERVICE_URL"
+gcloud services enable \
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  secretmanager.googleapis.com \
+  iam.googleapis.com \
+  artifactregistry.googleapis.com
 ```
 
-4. Configure strict caller + audience validation:
+---
+
+## Step 2 — Create the Cloud Run service account
 
 ```bash
-export GEMINI_CALLER_SA="gemini-enterprise-caller@${PROJECT_ID}.iam.gserviceaccount.com"
-gcloud run services update agentbox-a2a \
-  --region ${REGION} \
-  --update-env-vars EXPECTED_CALLER_SA=${GEMINI_CALLER_SA},EXPECTED_AUDIENCE=${SERVICE_URL}
+# Create SA (skip if it already exists)
+gcloud iam service-accounts create "${SERVICE_NAME}" \
+  --display-name="AgentBox A2A Cloud Run SA" \
+  --project="${PROJECT_ID}"
+
+# Confirm
+gcloud iam service-accounts describe "${A2A_SA}"
 ```
 
-5. Grant invoker role to Gemini caller service account:
+---
+
+## Step 3 — Find the Gemini Enterprise caller service account
+
+Gemini Enterprise uses a managed service account to call your A2A endpoint.
+Find it one of these ways:
+
+**Option A — From GCP Console**
+```
+IAM & Admin → IAM → filter "discoveryengine" or "gemini"
+Look for: service-{PROJECT_NUMBER}@gcp-sa-discoveryengine.iam.gserviceaccount.com
+```
+
+**Option B — From gcloud**
+```bash
+PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')
+echo "service-${PROJECT_NUMBER}@gcp-sa-discoveryengine.iam.gserviceaccount.com"
+```
+
+**Option C — From Gemini Enterprise Admin UI**
+```
+Gemini Enterprise Admin → Agent Gallery → Add agent → A2A
+The caller SA is shown during the configuration flow.
+```
+
+Once you have it:
+```bash
+# Set it — replace with the actual SA from above
+export GEMINI_CALLER_SA="service-XXXX@gcp-sa-discoveryengine.iam.gserviceaccount.com"
+```
+
+---
+
+## Step 4 — Test locally with Docker (optional but recommended)
 
 ```bash
-gcloud run services add-iam-policy-binding agentbox-a2a \
-  --region ${REGION} \
+# Build the A2A image locally
+docker build -f a2a/Dockerfile.a2a -t agentbox-a2a:local .
+
+# Run locally — skip real token validation by setting a dummy audience
+docker run --rm -p 8080:8080 \
+  -e EXPECTED_AUDIENCE="http://localhost:8080" \
+  -e EXPECTED_CALLER_SA="test@test.com" \
+  -e AGENTBOX_BACKEND="cli" \
+  agentbox-a2a:local
+
+# In a second terminal — test the health endpoint
+curl -s http://localhost:8080/health | jq .
+
+# Test the agent card (no auth required — A2A discovery standard)
+curl -s http://localhost:8080/.well-known/agent.json | jq .
+
+# Test a task (no real token in local mode — server will reject but shows routing works)
+curl -s -X POST http://localhost:8080/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"t1","method":"tasks/send","params":{"id":"t1","message":{"role":"user","parts":[{"type":"text","text":"hello"}]}}}' \
+  | jq .
+```
+
+Stop the local container when done: `Ctrl+C`
+
+---
+
+## Step 5 — Build and deploy to Cloud Run
+
+```bash
+# Submit to Cloud Build (builds Docker image + deploys via service.yaml)
+gcloud builds submit \
+  --config a2a/cloud_run/cloudbuild.yaml \
+  --substitutions "_REGION=${REGION},_GEMINI_CALLER_SA=${GEMINI_CALLER_SA},_SERVICE_URL=" \
+  --project "${PROJECT_ID}" \
+  .
+
+# Get the deployed URL
+export SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --format='value(status.url)')
+echo "Service URL: ${SERVICE_URL}"
+```
+
+---
+
+## Step 6 — Set security environment variables
+
+```bash
+gcloud run services update "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --update-env-vars \
+    "EXPECTED_CALLER_SA=${GEMINI_CALLER_SA},EXPECTED_AUDIENCE=${SERVICE_URL},SERVICE_URL=${SERVICE_URL}"
+```
+
+---
+
+## Step 7 — Grant Gemini Enterprise SA invoker access
+
+```bash
+# Grant ONLY Gemini Enterprise SA — no other principals
+gcloud run services add-iam-policy-binding "${SERVICE_NAME}" \
+  --region "${REGION}" \
   --member="serviceAccount:${GEMINI_CALLER_SA}" \
   --role="roles/run.invoker"
+
+# Verify — ONLY Gemini SA should appear under roles/run.invoker
+gcloud run services get-iam-policy "${SERVICE_NAME}" \
+  --region "${REGION}"
 ```
 
-6. Confirm unauthenticated access is disabled:
+---
+
+## Step 8 — Test the deployed endpoint
+
+Before registering in Gemini, verify the endpoint works using impersonation of the Gemini SA:
 
 ```bash
-gcloud run services get-iam-policy agentbox-a2a --region ${REGION}
-```
+# Get an identity token impersonating the Gemini SA
+# (requires your account to have roles/iam.serviceAccountTokenCreator on GEMINI_CALLER_SA)
+TOKEN=$(gcloud auth print-identity-token \
+  --impersonate-service-account="${GEMINI_CALLER_SA}" \
+  --audiences="${SERVICE_URL}")
 
-## One-shot setup
+# 1. Health check (no auth needed)
+curl -s "${SERVICE_URL}/health" | jq .
+# Expected: {"status": "ok", "issues": []}
 
-Use:
+# 2. Agent card (no auth needed — A2A discovery)
+curl -s "${SERVICE_URL}/.well-known/agent.json" | jq .
+# Expected: agent card JSON with correct "url" field = SERVICE_URL
 
-```bash
-PROJECT_ID=YOUR_PROJECT_ID GEMINI_CALLER_SA=caller@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-  a2a/cloud_run/setup.sh
-```
-
-`setup.sh` enables APIs, creates service account, grants invoker, deploys, and prints Gemini registration API example.
-
-## Register in Gemini Enterprise Agent Gallery
-
-### UI path
-
-1. Open Gemini Enterprise Admin.
-2. Go to Agent Gallery / Agent management.
-3. Add external/sub-agent using A2A endpoint.
-4. Provide:
-   - Endpoint URL: `${SERVICE_URL}`
-   - Agent card URL: `${SERVICE_URL}/.well-known/agent.json`
-5. Save and run a test task.
-
-### API path (example)
-
-```bash
-curl -X POST "https://geminienterprise.googleapis.com/v1/projects/${PROJECT_ID}/locations/global/agents" \
-  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "displayName": "AgentBox",
-    "description": "AgentBox A2A sub-agent",
-    "a2aConfig": {
-      "endpoint": "'"${SERVICE_URL}"'",
-      "agentCardUrl": "'"${SERVICE_URL}"'/.well-known/agent.json"
-    }
-  }'
-```
-
-## Testing before Gemini registration
-
-Obtain identity token for an allowed caller service account:
-
-```bash
-TOKEN="$(gcloud auth print-identity-token)"
-```
-
-Call agent card:
-
-```bash
-curl -sS "${SERVICE_URL}/.well-known/agent.json" | jq .
-```
-
-Call A2A `tasks/send`:
-
-```bash
-curl -sS -X POST "${SERVICE_URL}/" \
+# 3. A2A task — tasks/send
+curl -s -X POST "${SERVICE_URL}/" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
-    "id": "task-123",
+    "id": "test-001",
     "method": "tasks/send",
     "params": {
-      "id": "task-123",
+      "id": "test-001",
       "message": {
         "role": "user",
-        "parts": [{"type": "text", "text": "What files are in the workspace?"}]
+        "parts": [{"type": "text", "text": "What is 2 + 2?"}]
       }
     }
   }' | jq .
-```
+# Expected: result with status.state="working" or "completed" + artifacts
 
-Call A2A `tasks/get`:
-
-```bash
-curl -sS -X POST "${SERVICE_URL}/" \
+# 4. Poll for result — tasks/get
+curl -s -X POST "${SERVICE_URL}/" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": "get-123",
-    "method": "tasks/get",
-    "params": {"id": "task-123"}
-  }' | jq .
+  -d "{
+    \"jsonrpc\": \"2.0\",
+    \"id\": \"get-001\",
+    \"method\": \"tasks/get\",
+    \"params\": {\"id\": \"test-001\"}
+  }" | jq .
+
+# 5. Confirm unauthorized access is rejected (no token)
+curl -s -X POST "${SERVICE_URL}/" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"x","method":"tasks/send","params":{}}' | jq .
+# Expected: HTTP 401 + A2A error response
 ```
 
-## Security model
+---
 
-- IAM-only invocation (`--no-allow-unauthenticated`).
-- Cloud Run ingress restricted to `internal-and-cloud-load-balancing`.
-- A2A server validates Google-signed identity token and verifies caller service account allowlist.
-- No user-facing OpenClaw endpoint exposure.
-- Wrapper timeout is capped at 55 minutes to stay under Cloud Run 60-minute max.
+## Step 9 — Register in Gemini Enterprise Agent Gallery
 
-## Important gotcha
+### Option A — Admin UI (recommended for first time)
 
-Gemini sends one inbound Bearer token for the A2A call. Do not forward/chaining this token to downstream services. Use Workload Identity and/or Secret Manager for downstream auth from Cloud Run.
+```
+1. Go to: console.cloud.google.com → Gemini Enterprise → Agent Gallery
+2. Click "Add agent" → "Custom agent via A2A"
+3. Fill in:
+     Display name:   AgentBox
+     Endpoint URL:   <paste SERVICE_URL>
+     Agent card URL: <paste SERVICE_URL>/.well-known/agent.json
+4. Click "Test connection" — should show green
+5. Save and enable for your org
+```
 
-## Runtime behavior notes
+### Option B — Admin API
 
-- Stateless by design: no in-memory task persistence across requests.
-- `tasks/get` returns task-not-found for historical tasks unless you add external persistence.
-- Backend execution mode:
-  - `AGENTBOX_BACKEND=cli` (default): runs `openclaw system event --text ... --mode now`
-  - `AGENTBOX_BACKEND=gateway`: posts to `${AGENTBOX_GATEWAY_URL}/system/event`
+```bash
+curl -s -X POST \
+  "https://discoveryengine.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/global/collections/default_collection/engines/gemini-enterprise/assistants/default_assistant/agents" \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"displayName\": \"AgentBox\",
+    \"description\": \"AgentBox AI engineering sub-agent powered by OpenClaw\",
+    \"a2aAgentDefinition\": {
+      \"jsonAgentCard\": $(curl -s ${SERVICE_URL}/.well-known/agent.json | jq -c . | jq -Rs .)
+    }
+  }" | jq .
+```
+
+---
+
+## Step 10 — Verify end-to-end from Gemini
+
+```
+1. Open Gemini Enterprise chat (gemini.google.com/enterprise or your org's URL)
+2. Type: "@AgentBox what files are in your workspace?"
+3. Gemini should route the request to AgentBox via A2A and return the response
+```
+
+---
+
+## Redeployment (after code changes)
+
+```bash
+# Rebuild and redeploy with latest commit
+gcloud builds submit \
+  --config a2a/cloud_run/cloudbuild.yaml \
+  --substitutions "_REGION=${REGION},_GEMINI_CALLER_SA=${GEMINI_CALLER_SA},_SERVICE_URL=${SERVICE_URL}" \
+  --project "${PROJECT_ID}" \
+  .
+```
+
+---
+
+## Environment variable reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EXPECTED_AUDIENCE` | ✅ | Cloud Run service URL (e.g. `https://agentbox-a2a-xxxx.a.run.app`) |
+| `EXPECTED_CALLER_SA` | ✅ | Gemini Enterprise service account email (comma-separated for multiple) |
+| `AGENTBOX_GATEWAY_URL` | optional | OpenClaw gateway URL (default: `http://localhost:3000`) |
+| `AGENTBOX_BACKEND` | optional | `cli` (default) or `gateway` |
+| `GOOGLE_CLOUD_PROJECT` | optional | GCP project ID for logging |
+| `SERVICE_URL` | optional | Alias for `EXPECTED_AUDIENCE` |
+
+---
+
+## Troubleshooting
+
+**`403 Forbidden` from Cloud Run (before reaching app)**
+```bash
+# Check IAM — only GEMINI_CALLER_SA should have run.invoker
+gcloud run services get-iam-policy "${SERVICE_NAME}" --region "${REGION}"
+# If missing, re-run Step 7
+```
+
+**`401 Unauthorized: Caller X is not in EXPECTED_CALLER_SA allowlist` (from app)**
+```bash
+# The Gemini SA email doesn't match what's in EXPECTED_CALLER_SA
+# Check what SA Gemini is actually using via Cloud Logging:
+gcloud logging read \
+  'resource.type="cloud_run_revision" AND textPayload=~"Auth rejected"' \
+  --project="${PROJECT_ID}" \
+  --limit=10 \
+  --format="table(timestamp, textPayload)"
+# Update EXPECTED_CALLER_SA with the correct email and re-run Step 6
+```
+
+**`Server is missing EXPECTED_AUDIENCE configuration` (health check fails)**
+```bash
+# Re-run Step 6 to set the env vars
+gcloud run services update "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --update-env-vars "EXPECTED_CALLER_SA=${GEMINI_CALLER_SA},EXPECTED_AUDIENCE=${SERVICE_URL}"
+```
+
+**`impersonate-service-account` fails in Step 8**
+```bash
+# Grant yourself token creator on the Gemini SA
+gcloud iam service-accounts add-iam-policy-binding "${GEMINI_CALLER_SA}" \
+  --member="user:$(gcloud config get-value account)" \
+  --role="roles/iam.serviceAccountTokenCreator"
+```
+
+**View live logs**
+```bash
+gcloud run services logs tail "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --project "${PROJECT_ID}"
+```
+
+---
+
+## Security notes
+
+- **Ingress:** `internal-and-cloud-load-balancing` — not directly reachable from the public internet without going through Google's infrastructure
+- **Auth:** `--no-allow-unauthenticated` + app-level email check — two independent rejection layers
+- **Token chaining:** Gemini injects one Bearer token for the A2A call. **Do not forward it downstream.** For downstream service auth, use [Workload Identity](https://cloud.google.com/run/docs/securing/service-identity) and/or [Secret Manager](https://cloud.google.com/secret-manager)
+- **Rotating Gemini SA:** If Gemini's SA email changes, update `EXPECTED_CALLER_SA` and re-run Step 6 + Step 7
