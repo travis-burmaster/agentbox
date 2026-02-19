@@ -1,8 +1,10 @@
 import asyncio
+import base64
 import json
+import logging
 import os
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 import httpx
 from fastapi import FastAPI, Request
@@ -16,6 +18,11 @@ A2A_JSONRPC = "2.0"
 TASK_TIMEOUT_SECONDS = 55 * 60  # 55 min for Cloud Run max window
 DEFAULT_GATEWAY_URL = "http://localhost:3000"
 CARD_PATH = Path(__file__).with_name("agent_card.json")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("agentbox.a2a")
+_AGENT_CARD_CACHE: dict = json.loads(CARD_PATH.read_text(encoding="utf-8"))
+_tasks: dict = {}
 
 
 class Part(BaseModel):
@@ -40,7 +47,7 @@ class GetParams(BaseModel):
 
 class JsonRpcRequest(BaseModel):
     jsonrpc: str = Field(default=A2A_JSONRPC)
-    id: Optional[str] = None
+    id: Optional[Union[str, int]] = None
     method: str
     params: Dict[str, Any]
 
@@ -48,7 +55,12 @@ class JsonRpcRequest(BaseModel):
 app = FastAPI(title="AgentBox A2A Wrapper", version="1.0.0")
 
 
-def _a2a_error(code: int, message: str, rpc_id: Optional[str] = None, http_status: int = 200) -> JSONResponse:
+def _a2a_error(
+    code: int,
+    message: str,
+    rpc_id: Optional[Union[str, int]] = None,
+    http_status: int = 200,
+) -> JSONResponse:
     return JSONResponse(
         status_code=http_status,
         content={
@@ -62,26 +74,53 @@ def _a2a_error(code: int, message: str, rpc_id: Optional[str] = None, http_statu
     )
 
 
-def _a2a_result(rpc_id: Optional[str], task_id: str, text: str, state: str = "completed") -> Dict[str, Any]:
-    return {
+def _a2a_result(
+    rpc_id: Optional[Union[str, int]],
+    task_id: str,
+    text: Optional[str] = None,
+    state: str = "completed",
+) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
         "jsonrpc": A2A_JSONRPC,
         "id": rpc_id,
         "result": {
             "id": task_id,
             "status": {"state": state},
-            "artifacts": [
-                {
-                    "name": "result",
-                    "parts": [{"type": "text", "text": text}],
-                }
-            ],
         },
     }
+    if text is not None:
+        result["result"]["artifacts"] = [
+            {
+                "name": "result",
+                "parts": [{"type": "text", "text": text}],
+            }
+        ]
+    return result
 
 
 def _extract_user_text(message: Message) -> str:
     chunks = [p.text for p in message.parts if p.type == "text" and p.text]
     return "\n".join(chunks).strip()
+
+
+def _extract_caller_email_from_bearer(authz_header: Optional[str]) -> Optional[str]:
+    if not authz_header or not authz_header.startswith("Bearer "):
+        return None
+
+    token_parts = authz_header.split(" ", 1)[1].strip().split(".")
+    if len(token_parts) < 2:
+        return None
+
+    payload = token_parts[1]
+    padding = "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(payload + padding)
+        claims = json.loads(decoded.decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+
+    email = claims.get("email")
+    return str(email) if email else None
 
 
 def _validate_google_token(authz_header: Optional[str]) -> Optional[str]:
@@ -162,46 +201,62 @@ async def _invoke_openclaw(task_text: str) -> str:
     return out or err or "Task accepted by OpenClaw"
 
 
-async def _stream_a2a_response(rpc_id: Optional[str], task_id: str, task_text: str) -> AsyncIterator[bytes]:
-    started = {
-        "jsonrpc": A2A_JSONRPC,
-        "id": rpc_id,
-        "result": {
-            "id": task_id,
-            "status": {"state": "working"},
-            "artifacts": [
-                {
-                    "name": "progress",
-                    "parts": [{"type": "text", "text": "Task accepted by AgentBox A2A wrapper"}],
-                }
-            ],
-        },
-    }
+async def _stream_a2a_response(rpc_id: Optional[Union[str, int]], task_id: str) -> AsyncIterator[bytes]:
+    started = _a2a_result(rpc_id=rpc_id, task_id=task_id, text="Task is running", state="working")
     yield f"data: {json.dumps(started)}\n\n".encode("utf-8")
 
-    try:
-        output = await _invoke_openclaw(task_text)
-        finished = _a2a_result(rpc_id=rpc_id, task_id=task_id, text=output, state="completed")
-        yield f"data: {json.dumps(finished)}\n\n".encode("utf-8")
-    except Exception as exc:  # noqa: BLE001
-        err = {
-            "jsonrpc": A2A_JSONRPC,
-            "id": rpc_id,
-            "error": {"code": -32001, "message": f"Task execution failed: {exc}"},
-        }
-        yield f"data: {json.dumps(err)}\n\n".encode("utf-8")
+    while True:
+        task = _tasks.get(task_id)
+        if task is None:
+            unknown = _a2a_result(rpc_id=rpc_id, task_id=task_id, state="unknown")
+            yield f"data: {json.dumps(unknown)}\n\n".encode("utf-8")
+            return
+
+        if task.done():
+            try:
+                output = task.result()
+                finished = _a2a_result(rpc_id=rpc_id, task_id=task_id, text=output, state="completed")
+                yield f"data: {json.dumps(finished)}\n\n".encode("utf-8")
+                logger.info("task completed task_id=%s mode=stream", task_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("task failed task_id=%s mode=stream error=%s", task_id, exc)
+                err = {
+                    "jsonrpc": A2A_JSONRPC,
+                    "id": rpc_id,
+                    "error": {"code": -32001, "message": f"Task execution failed: {exc}"},
+                }
+                yield f"data: {json.dumps(err)}\n\n".encode("utf-8")
+            return
+
+        await asyncio.sleep(2)
 
 
 @app.get("/.well-known/agent.json")
-async def agent_card() -> JSONResponse:
-    card = json.loads(CARD_PATH.read_text(encoding="utf-8"))
+async def agent_card(request: Request) -> JSONResponse:
+    card = dict(_AGENT_CARD_CACHE)
+    service_url = os.getenv("SERVICE_URL") or os.getenv("EXPECTED_AUDIENCE") or str(request.base_url).rstrip("/")
+    card["url"] = service_url
     return JSONResponse(content=card)
+
+
+@app.get("/health")
+async def health() -> JSONResponse:
+    issues = []
+    if not (os.getenv("EXPECTED_AUDIENCE") or os.getenv("SERVICE_URL")):
+        issues.append("EXPECTED_AUDIENCE not configured")
+    if not os.getenv("EXPECTED_CALLER_SA"):
+        issues.append("EXPECTED_CALLER_SA not configured")
+    ok = not issues
+    return JSONResponse({"status": "ok" if ok else "misconfigured", "issues": issues}, status_code=200 if ok else 500)
 
 
 @app.post("/")
 async def a2a_root(request: Request) -> JSONResponse | StreamingResponse:
-    auth_err = _validate_google_token(request.headers.get("Authorization"))
+    authz_header = request.headers.get("Authorization")
+    auth_err = await asyncio.to_thread(_validate_google_token, authz_header)
     if auth_err:
+        caller_email = _extract_caller_email_from_bearer(authz_header)
+        logger.warning("auth failure caller_email=%s reason=%s", caller_email or "unknown", auth_err)
         return _a2a_error(code=-32000, message=f"Unauthorized: {auth_err}", http_status=401)
 
     try:
@@ -227,19 +282,29 @@ async def a2a_root(request: Request) -> JSONResponse | StreamingResponse:
         if not task_text:
             return _a2a_error(code=-32602, message="User text is required in message.parts", rpc_id=rpc.id)
 
+        task = _tasks.get(params.id)
+        if task is None or task.done():
+            task = asyncio.create_task(_invoke_openclaw(task_text))
+            _tasks[params.id] = task
+            logger.info("task started task_id=%s mode=%s", params.id, "stream" if params.stream else "poll")
+
+            def _done_callback(done_task: asyncio.Task, task_id: str = params.id) -> None:
+                try:
+                    done_task.result()
+                    logger.info("task completed task_id=%s", task_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("task failed task_id=%s error=%s", task_id, exc)
+
+            task.add_done_callback(_done_callback)
+
         if params.stream:
             return StreamingResponse(
-                _stream_a2a_response(rpc.id, params.id, task_text),
+                _stream_a2a_response(rpc.id, params.id),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
             )
 
-        try:
-            output = await _invoke_openclaw(task_text)
-        except Exception as exc:  # noqa: BLE001
-            return _a2a_error(code=-32001, message=f"Task execution failed: {exc}", rpc_id=rpc.id)
-
-        return JSONResponse(content=_a2a_result(rpc.id, params.id, output, "completed"))
+        return JSONResponse(content=_a2a_result(rpc.id, params.id, state="working"))
 
     if rpc.method == "tasks/get":
         try:
@@ -247,14 +312,18 @@ async def a2a_root(request: Request) -> JSONResponse | StreamingResponse:
         except Exception as exc:  # noqa: BLE001
             return _a2a_error(code=-32602, message=f"Invalid params: {exc}", rpc_id=rpc.id)
 
-        # Stateless design: this wrapper does not persist task lifecycle between requests.
-        return _a2a_error(
-            code=-32004,
-            message=(
-                f"Task '{params.id}' not found. This A2A wrapper is stateless and only returns status "
-                "within the active request lifecycle."
-            ),
-            rpc_id=rpc.id,
-        )
+        task = _tasks.get(params.id)
+        if task is None:
+            return JSONResponse(content=_a2a_result(rpc.id, params.id, state="unknown"))
+
+        if not task.done():
+            return JSONResponse(content=_a2a_result(rpc.id, params.id, state="working"))
+
+        try:
+            output = task.result()
+            return JSONResponse(content=_a2a_result(rpc.id, params.id, text=output, state="completed"))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("task failed while polling task_id=%s error=%s", params.id, exc)
+            return _a2a_error(code=-32001, message=f"Task execution failed: {exc}", rpc_id=rpc.id)
 
     return _a2a_error(code=-32601, message=f"Method not found: {rpc.method}", rpc_id=rpc.id)

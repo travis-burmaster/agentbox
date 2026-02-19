@@ -39,16 +39,21 @@ if [[ -z "${GEMINI_CALLER_SA:-}" ]]; then
   exit 1
 fi
 
-echo "[4/6] Running initial Cloud Build + deploy"
-gcloud builds submit --config a2a/cloud_run/cloudbuild.yaml .
-
-SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format='value(status.url)')"
-
-echo "[5/6] Granting Cloud Run Invoker to ${GEMINI_CALLER_SA}"
+echo "[4/6] Granting Cloud Run Invoker to ${GEMINI_CALLER_SA}"
 gcloud run services add-iam-policy-binding "${SERVICE_NAME}" \
   --member="serviceAccount:${GEMINI_CALLER_SA}" \
   --role="roles/run.invoker" \
   --region="${REGION}"
+
+echo "[5/6] Running initial Cloud Build + deploy"
+gcloud builds submit --config a2a/cloud_run/cloudbuild.yaml .
+
+SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format='value(status.url)')"
+
+echo "[5b/6] Updating security environment variables on deployed service"
+gcloud run services update "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --update-env-vars "EXPECTED_CALLER_SA=${GEMINI_CALLER_SA},EXPECTED_AUDIENCE=${SERVICE_URL}"
 
 echo "[6/6] Gemini Enterprise registration example (Admin API)"
 cat <<EOF
@@ -63,13 +68,4 @@ curl -X POST "https://geminienterprise.googleapis.com/v1/projects/${PROJECT_ID}/
       "agentCardUrl": "'"${SERVICE_URL}"'/.well-known/agent.json"
     }
   }'
-EOF
-
-cat <<EOF
-Next step:
-- Update Cloud Run env EXPECTED_CALLER_SA=${GEMINI_CALLER_SA}
-- Update EXPECTED_AUDIENCE=${SERVICE_URL}
-- Re-deploy if needed:
-    gcloud run services update ${SERVICE_NAME} --region ${REGION} \\
-      --update-env-vars EXPECTED_CALLER_SA=${GEMINI_CALLER_SA},EXPECTED_AUDIENCE=${SERVICE_URL}
 EOF

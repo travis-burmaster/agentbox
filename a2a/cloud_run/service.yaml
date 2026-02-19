@@ -3,7 +3,7 @@ kind: Service
 metadata:
   name: agentbox-a2a
   annotations:
-    run.googleapis.com/ingress: internal
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
     run.googleapis.com/invoker-iam-disabled: "false"
 spec:
   template:
@@ -13,6 +13,7 @@ spec:
         autoscaling.knative.dev/maxScale: "10"
         run.googleapis.com/cpu-throttling: "false"
     spec:
+      serviceAccountName: agentbox-a2a@PROJECT_ID.iam.gserviceaccount.com
       containerConcurrency: 10
       timeoutSeconds: 3300
       containers:
@@ -29,6 +30,6 @@ spec:
             - name: GOOGLE_CLOUD_PROJECT
               value: PROJECT_ID
             - name: EXPECTED_AUDIENCE
-              value: https://agentbox-a2a-PLACEHOLDER-uc.a.run.app
+              value: SERVICE_URL_PLACEHOLDER
             - name: EXPECTED_CALLER_SA
-              value: gemini-enterprise-caller@PROJECT_ID.iam.gserviceaccount.com
+              value: GEMINI_CALLER_SA_PLACEHOLDER

@@ -1,3 +1,8 @@
+substitutions:
+  _REGION: us-central1
+  _GEMINI_CALLER_SA: ""
+  _SERVICE_URL: ""
+
 steps:
   - name: gcr.io/cloud-builders/docker
     args:
@@ -14,22 +19,23 @@ steps:
       - gcr.io/$PROJECT_ID/agentbox-a2a:$COMMIT_SHA
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - agentbox-a2a
-      - --image
-      - gcr.io/$PROJECT_ID/agentbox-a2a:$COMMIT_SHA
-      - --region
-      - us-central1
-      - --platform
-      - managed
-      - --no-allow-unauthenticated
-      - --service-account
-      - agentbox-a2a@$PROJECT_ID.iam.gserviceaccount.com
-      - --set-env-vars
-      - AGENTBOX_GATEWAY_URL=http://localhost:3000,GOOGLE_CLOUD_PROJECT=$PROJECT_ID
+      - -c
+      - |
+        sed \
+          -e "s|gcr.io/PROJECT_ID/agentbox-a2a:latest|gcr.io/$PROJECT_ID/agentbox-a2a:$COMMIT_SHA|g" \
+          -e "s|PROJECT_ID|$PROJECT_ID|g" \
+          -e "s|GEMINI_CALLER_SA_PLACEHOLDER|${_GEMINI_CALLER_SA}|g" \
+          -e "s|SERVICE_URL_PLACEHOLDER|${_SERVICE_URL}|g" \
+          a2a/cloud_run/service.yaml | \
+        gcloud run services replace - \
+          --region ${_REGION} \
+          --platform managed
+        gcloud run services remove-iam-policy-binding agentbox-a2a \
+          --region ${_REGION} \
+          --member="allUsers" \
+          --role="roles/run.invoker" 2>/dev/null || true
 
 images:
   - gcr.io/$PROJECT_ID/agentbox-a2a:$COMMIT_SHA
