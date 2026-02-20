@@ -75,10 +75,28 @@ else
   ENV_FILTER='.'
 fi
 
-get_secret() { jq -r --arg k "$1" "${ENV_FILTER}"'[$k] // empty' "${SECRETS_JSON}"; }
+# Look up a key case-insensitively from the env object
+get_secret() {
+  local val
+  val=$(jq -r --arg k "$1" "${ENV_FILTER}"'
+    | to_entries[]
+    | select(.key | ascii_downcase == ($k | ascii_downcase))
+    | .value' "${SECRETS_JSON}" | head -1)
+  echo "${val}"
+}
 
 ANTHROPIC_API_KEY=$(get_secret "anthropic_api_key")
 OPENCLAW_GATEWAY_TOKEN=$(get_secret "openclaw_gateway_token")
+
+# If credentials aren't in the env bundle, try the restored openclaw config
+if [ -z "${ANTHROPIC_API_KEY}" ] && [ -f "${OPENCLAW_HOME}/openclaw.json" ]; then
+  ANTHROPIC_API_KEY=$(jq -r '.. | .anthropicApiKey? // empty' "${OPENCLAW_HOME}/openclaw.json" 2>/dev/null | head -1)
+  log "anthropic_api_key sourced from restored openclaw.json"
+fi
+if [ -z "${OPENCLAW_GATEWAY_TOKEN}" ] && [ -f "${OPENCLAW_HOME}/openclaw.json" ]; then
+  OPENCLAW_GATEWAY_TOKEN=$(jq -r '.. | .gatewayToken? // .token? // empty' "${OPENCLAW_HOME}/openclaw.json" 2>/dev/null | head -1)
+  log "openclaw_gateway_token sourced from restored openclaw.json"
+fi
 
 # Export every key from the env object as an uppercase env var
 # (except encryption_key which should not be re-exported)
@@ -105,20 +123,24 @@ if jq -e '.openclaw_state.files // empty' "${SECRETS_JSON}" >/dev/null 2>&1; the
   done < <(jq -r '.openclaw_state.files | to_entries[] | "\(.key)\t\(.value.content)"' "${SECRETS_JSON}")
 fi
 
-# ── 6. Run headless onboard ───────────────────────────────────────────────────
-if [ -z "${ANTHROPIC_API_KEY}" ]; then
-  log "ERROR: anthropic_api_key missing from secrets bundle"
-  shred -u "${SECRETS_JSON}" 2>/dev/null || rm -f "${SECRETS_JSON}"
-  exit 1
-fi
+# ── 6. Run headless onboard (or skip if config was restored) ─────────────────
+# If openclaw.json was restored from the backup and already has a model configured,
+# skip onboard entirely — the restored config is the source of truth.
+if openclaw config get agents.defaults.model.primary &>/dev/null 2>&1; then
+  log "OpenClaw already configured (restored from backup) — skipping onboard"
+else
+  # Onboard requires credentials
+  if [ -z "${ANTHROPIC_API_KEY}" ]; then
+    log "ERROR: anthropic_api_key not found in secrets bundle or restored config"
+    shred -u "${SECRETS_JSON}" 2>/dev/null || rm -f "${SECRETS_JSON}"
+    exit 1
+  fi
+  if [ -z "${OPENCLAW_GATEWAY_TOKEN}" ]; then
+    log "ERROR: openclaw_gateway_token not found in secrets bundle or restored config"
+    shred -u "${SECRETS_JSON}" 2>/dev/null || rm -f "${SECRETS_JSON}"
+    exit 1
+  fi
 
-if [ -z "${OPENCLAW_GATEWAY_TOKEN}" ]; then
-  log "ERROR: openclaw_gateway_token missing from secrets bundle"
-  shred -u "${SECRETS_JSON}" 2>/dev/null || rm -f "${SECRETS_JSON}"
-  exit 1
-fi
-
-if ! openclaw config get agents.defaults.model.primary &>/dev/null 2>&1; then
   log "Running headless onboard..."
   openclaw onboard \
     --non-interactive --accept-risk \
@@ -133,8 +155,6 @@ if ! openclaw config get agents.defaults.model.primary &>/dev/null 2>&1; then
     --skip-skills --skip-ui --skip-health \
     --no-install-daemon
   log "Onboard complete"
-else
-  log "OpenClaw already configured — skipping onboard"
 fi
 
 # ── 7. Shred decrypted secrets (never leave plaintext on disk) ───────────────
