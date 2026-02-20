@@ -1,4 +1,5 @@
 {
+  "protocolVersion": "0.1",
   "name": "AgentBox",
   "description": "AI engineering agent powered by OpenClaw. Executes code, runs analysis, manages workflows, searches the web, and calls APIs on behalf of Gemini Enterprise.",
   "url": "https://agentbox-placeholder.a.run.app",
