@@ -146,29 +146,45 @@ pnpm tsgo                   # TypeScript checks
 
 **Note**: OpenClaw requires Node.js 22+ and uses pnpm as package manager.
 
-### Secrets Management
+### Secrets Management (AES-256-CBC encrypted bundle)
+
+All secrets for the A2A Cloud Run image live in a single encrypted file
+(`secrets_encrypted.enc`) committed to the **private workspace repo**
+(separate from this repo). Only 2 secrets ever touch Google Secret Manager.
 
 ```bash
-# Generate encryption key (ONCE, backup safely!)
-age-keygen -o secrets/agent.key
-age-keygen -y secrets/agent.key > secrets/agent.key.pub
+# ── One-time setup ────────────────────────────────────────────────────────────
+# 1. Copy the example secrets template
+cp secrets.example.json secrets.json
 
-# Create and encrypt secrets
-cat > secrets/secrets.env <<EOF
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-TELEGRAM_BOT_TOKEN=...
-EOF
+# 2. Fill in values (see secrets.example.json for all keys)
+#    Required: anthropic_api_key, openclaw_gateway_token
+#    Optional: smtp_*, notion_secret, telegram_bot_token, + any skill secrets
 
-age -r $(cat secrets/agent.key.pub) -o secrets/secrets.env.age secrets/secrets.env
-shred -u secrets/secrets.env  # Delete plaintext immediately!
+# 3. Encrypt → produces secrets_encrypted.enc
+ENCRYPTION_KEY="your-strong-passphrase" ./scripts/encrypt-secrets.sh
+# or: ./scripts/encrypt-secrets.sh  (prompts for key)
 
-# Load secrets (decrypts in-memory, never writes to disk)
-source scripts/load-secrets.sh
+# 4. Commit the encrypted file to your workspace repo
+#    NEVER commit secrets.json — it is gitignored
 
-# Rotate keys (every 6-12 months)
-./scripts/rotate-keys.sh
+# ── Adding a new skill's secrets ─────────────────────────────────────────────
+./scripts/decrypt-secrets.sh          # decrypt to secrets.json
+# edit secrets.json → add new key (e.g. "my_skill_api_key": "...")
+./scripts/encrypt-secrets.sh          # re-encrypt
+# commit secrets_encrypted.enc to workspace repo + push
+# redeploy Cloud Run — no service.yaml changes needed
+
+# ── Decrypt for local inspection ──────────────────────────────────────────────
+ENCRYPTION_KEY="your-key" ./scripts/decrypt-secrets.sh
+cat secrets.json   # inspect
+shred -u secrets.json  # clean up
 ```
+
+**Encryption details:**
+- Algorithm: AES-256-CBC with salt, PBKDF2, 100,000 iterations
+- Compatible with standard openssl (no extra tools needed)
+- `secrets.json` and `secrets_decrypted.json` are both gitignored
 
 ## Architecture & Design
 
@@ -241,19 +257,29 @@ OpenClaw supports plugins/extensions in `extensions/*/`:
 
 ### Environment Variables
 
+**Cloud Run A2A image** — only 3 vars needed at the Cloud Run level:
+
 ```bash
-# OpenClaw paths
+# Plain env var (service.yaml)
+WORKSPACE_REPO=owner/your-workspace-repo   # GitHub path, no .git suffix
+
+# From Google Secret Manager
+GITHUB_TOKEN=github_pat_xxxx               # read+write access to WORKSPACE_REPO
+ENCRYPTION_KEY=your-passphrase             # decrypts secrets_encrypted.enc
+```
+
+All other credentials (Anthropic key, SMTP, Notion, etc.) are injected at
+runtime from `secrets_encrypted.enc` inside the workspace repo. See
+`secrets.example.json` for the full structure.
+
+**Base AgentBox image** (local VM):
+
+```bash
 OPENCLAW_HOME=/agentbox/.openclaw
 OPENCLAW_WORKSPACE=/agentbox/.openclaw/workspace
 OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
-
-# Runtime mode
 NODE_ENV=production
-
-# API keys (provide via encrypted secrets or environment)
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-TELEGRAM_BOT_TOKEN=...
+AGENTBOX_BACKEND=cli
 ```
 
 ### Gateway Configuration (openclaw.json)
@@ -275,13 +301,14 @@ openclaw config get
 
 ## Security Considerations
 
-- **Secrets**: Always use age encryption. Never commit `agent.key` or plaintext `.env` files.
-- **Network**: Bind ports to `127.0.0.1` only (localhost), never `0.0.0.0` (all interfaces).
-- **Volumes**: Mount secrets as read-only (`:ro`) when possible.
-- **Updates**: Regular dependency updates (`docker pull`, `pnpm update` in agentfork/).
-- **Firewall**: Configure UFW/iptables allowlists for API endpoints in production.
-- **Audit logs**: Monitor `/agentbox/logs` and `/var/log/audit/` for security events.
-- **Key rotation**: Rotate encryption keys every 6-12 months using `scripts/rotate-keys.sh`.
+- **Secrets (Cloud Run)**: Use `scripts/encrypt-secrets.sh` to produce `secrets_encrypted.enc`. Never commit `secrets.json`. Only `GITHUB_TOKEN` + `ENCRYPTION_KEY` touch Secret Manager.
+- **Secrets (local VM)**: Use age encryption for the base AgentBox image (`secrets/*.age`). Never commit `agent.key` or plaintext `.env` files.
+- **Network**: Gateway binds to loopback (`:3000` internal); only FastAPI port `:8080` is exposed externally on Cloud Run.
+- **Key rotation**: Rotate `ENCRYPTION_KEY` by decrypting with old key, re-encrypting with new key, updating Secret Manager, redeploying.
+- **Workspace repo**: Set `minScale: 1` on Cloud Run to avoid concurrent memory push conflicts.
+- **PAT scope**: Use a fine-grained GitHub PAT scoped to only the workspace repo with read+write Contents permission.
+- **Shred**: `docker-entrypoint.sh` runs `shred -u` on the decrypted secrets file before handing off to supervisord — no plaintext remains on disk.
+- **Updates**: Regular dependency updates (`pnpm update` in agentfork/, `openclaw@latest` version pin in Dockerfile).
 
 ## Troubleshooting
 
@@ -317,34 +344,153 @@ openclaw config get
 
 ## A2A Layer for Gemini Enterprise (Cloud Run)
 
-An A2A wrapper has been added under `a2a/` so Gemini Enterprise can call AgentBox as a sub-agent over JSON-RPC.
+An A2A wrapper lives under `a2a/` so Gemini Enterprise can call AgentBox as a
+sub-agent over JSON-RPC. The image is **self-contained** — it bundles the
+OpenClaw gateway + FastAPI A2A wrapper in a single container managed by
+`supervisord`. All configuration and secrets are pulled at startup from a
+**private GitHub workspace repo**; nothing sensitive is baked into the image.
 
-### Components
+### Repository layout
 
-- `a2a/server.py`: FastAPI A2A server.
-- `a2a/agent_card.json`: served at `/.well-known/agent.json`.
-- `a2a/Dockerfile.a2a`: standalone Cloud Run image build target.
-- `a2a/cloud_run/service.yaml`: Cloud Run manifest template.
-- `a2a/cloud_run/cloudbuild.yaml`: build + deploy pipeline.
-- `a2a/cloud_run/setup.sh`: bootstrap script for APIs/IAM/deploy.
-- `a2a/README.md`: end-to-end deployment and registration guide.
+```
+a2a/
+├── server.py              # FastAPI A2A server (tasks/send, tasks/get, /health)
+├── agent_card.json        # A2A agent card (served at /.well-known/agent.json)
+├── Dockerfile.a2a         # Cloud Run image (ubuntu:22.04, Node 22, gh CLI, jq)
+├── docker-entrypoint.sh   # Boot sequence (see below)
+├── supervisord.conf       # Process manager: uvicorn (8080) + openclaw gateway (3000)
+├── requirements.txt       # Python deps (fastapi, uvicorn, google-auth, httpx)
+└── cloud_run/
+    ├── service.yaml       # Cloud Run manifest template
+    ├── cloudbuild.yaml    # Build + deploy pipeline
+    └── setup.sh           # One-time GCP bootstrap (APIs/IAM/secrets)
+
+scripts/
+├── encrypt-secrets.sh     # Encrypt secrets.json → secrets_encrypted.enc
+└── decrypt-secrets.sh     # Decrypt secrets_encrypted.enc → secrets.json (local only)
+
+secrets.example.json       # Template — copy to secrets.json, fill in, encrypt
+.env.example               # Documents the 3 env vars needed
+```
+
+### Boot sequence (`docker-entrypoint.sh`)
+
+```
+1. Validate WORKSPACE_REPO, GITHUB_TOKEN, ENCRYPTION_KEY env vars
+2. Auth gh CLI + configure git with GITHUB_TOKEN
+3. git clone --depth=1 <WORKSPACE_REPO> → /agentbox/.openclaw/workspace
+   (or git pull if warm instance / persistent volume)
+4. openssl decrypt secrets_encrypted.enc → /agentbox/secrets_decrypted.json
+5. Extract anthropic_api_key + openclaw_gateway_token from JSON
+6. Export all other keys as env vars (auto-available to skills at runtime)
+7. openclaw onboard --non-interactive --accept-risk (skipped if already configured)
+8. shred -u /agentbox/secrets_decrypted.json  ← no plaintext left on disk
+9. exec supervisord → starts uvicorn (8080) + openclaw gateway (3000)
+```
+
+### Workspace repo (separate private GitHub repo)
+
+The workspace repo (`WORKSPACE_REPO=owner/repo`) is **not** this agentbox repo.
+It contains:
+- All OpenClaw workspace files: `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, etc.
+- `memory/` directory (agent memory — committed by agent on write)
+- `scripts/` (Python scripts: options scanner, yfinance, etc.)
+- `secrets_encrypted.enc` (AES-256-CBC encrypted secrets bundle)
+
+The agent commits and pushes memory changes back to this repo during operation
+so state persists across Cloud Run cold starts.
+
+### Environment variables
+
+| Variable | Source | Purpose |
+|---|---|---|
+| `WORKSPACE_REPO` | `.env` / `service.yaml` plain env | GitHub path (`owner/repo`) |
+| `GITHUB_TOKEN` | Google Secret Manager | Clone + push workspace repo |
+| `ENCRYPTION_KEY` | Google Secret Manager | Decrypt `secrets_encrypted.enc` |
+
+**Only 2 secrets ever touch Google Secret Manager.** All other credentials
+(Anthropic key, SMTP, Notion, Telegram, skill keys, etc.) live inside
+`secrets_encrypted.enc` in the workspace repo.
+
+### secrets_encrypted.enc structure (`secrets.example.json`)
+
+```json
+{
+  "anthropic_api_key": "sk-ant-...",
+  "openclaw_gateway_token": "...",
+  "smtp_host": "mail.smtp2go.com",
+  "smtp_port": "587",
+  "smtp_user": "...",
+  "smtp_password": "...",
+  "smtp_from": "bot@yourdomain.com",
+  "notion_secret": "secret_...",
+  "telegram_bot_token": "...",
+  "custom_skill_api_key": ""    ← add new skill secrets here
+}
+```
+
+All keys not in the reserved set are automatically exported as uppercase env vars
+(e.g. `custom_skill_api_key` → `CUSTOM_SKILL_API_KEY`).
+
+### Headless onboarding
+
+OpenClaw supports fully non-interactive setup via CLI flags:
+
+```bash
+openclaw onboard \
+  --non-interactive --accept-risk \
+  --flow manual --mode local \
+  --auth-choice anthropic-api-key \
+  --anthropic-api-key "${ANTHROPIC_API_KEY}" \
+  --gateway-auth token \
+  --gateway-token "${OPENCLAW_GATEWAY_TOKEN}" \
+  --gateway-bind loopback \
+  --workspace /agentbox/.openclaw/workspace \
+  --skip-channels --skip-daemon \
+  --skip-skills --skip-ui --skip-health \
+  --no-install-daemon
+```
+
+The entrypoint skips this step if `agents.defaults.model.primary` is already
+configured (idempotent — safe on warm restarts).
 
 ### Protocol behavior
 
-- `POST /` supports `tasks/send` and `tasks/get`.
-- Response format follows A2A JSON-RPC envelope with artifacts.
-- Streaming is supported through Server-Sent Events when `params.stream=true`.
-- Errors are returned as A2A JSON-RPC `error` objects (not raw stack traces).
+- `POST /` supports `tasks/send` and `tasks/get`
+- Response format follows A2A JSON-RPC envelope with artifacts
+- Streaming via Server-Sent Events when `params.stream=true`
+- Errors returned as A2A JSON-RPC `error` objects (not raw stack traces)
+- `/health` endpoint checks uvicorn liveness + (optionally) gateway TCP reachability
 
 ### Security and IAM
 
-- Cloud Run should be deployed with `--no-allow-unauthenticated`.
-- Wrapper validates Google-signed identity token and checks caller service account allowlist via `EXPECTED_CALLER_SA`.
-- Configure `EXPECTED_AUDIENCE` to Cloud Run service URL.
-- Do not chain inbound Gemini bearer tokens to downstream services.
-- For downstream auth, use Workload Identity and Secret Manager.
+- Cloud Run deployed with `--no-allow-unauthenticated` (IAM only)
+- Validates Google-signed identity token; checks caller SA via `EXPECTED_CALLER_SA`
+- Set `EXPECTED_AUDIENCE` to the Cloud Run service URL
+- Do not chain inbound Gemini bearer tokens to downstream services
+- For downstream auth use Workload Identity + Secret Manager
+- `minScale: 1` recommended (personal assistant — single instance avoids git merge conflicts on memory push)
 
 ### Runtime constraints
 
-- Task timeout is set to 55 minutes to fit Cloud Run 60-minute ceiling.
-- Wrapper is stateless and does not persist task lifecycle across requests.
+- Task timeout: 55 minutes (fits Cloud Run 60-minute ceiling)
+- Wrapper is stateless; session state persists via workspace repo git commits
+- Gateway runs on `:3000` (internal only); only `:8080` (FastAPI) is exposed
+
+### Local development
+
+```bash
+# 1. Copy and fill env
+cp .env.example .env
+# edit .env: set WORKSPACE_REPO, GITHUB_TOKEN, ENCRYPTION_KEY
+
+# 2. Build and run locally
+docker build -f a2a/Dockerfile.a2a -t agentbox-a2a:local .
+docker run --env-file .env -p 8080:8080 agentbox-a2a:local
+
+# 3. Test health
+curl http://localhost:8080/health
+
+# 4. Deploy to Cloud Run
+gcloud run services replace a2a/cloud_run/service.yaml --region=us-central1
+```
