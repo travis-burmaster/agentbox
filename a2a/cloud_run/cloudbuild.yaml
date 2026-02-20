@@ -1,0 +1,61 @@
+substitutions:
+  _REGION: us-central1
+  _GEMINI_CALLER_SA: ""
+  _SERVICE_URL: ""
+  _IMAGE_TAG: latest
+  _AR_REPO: agentbox
+
+steps:
+  - id: create-ar-repo
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - >-
+        gcloud artifacts repositories create $_AR_REPO
+        --repository-format=docker
+        --location=$_REGION
+        --project=$PROJECT_ID
+        --description="AgentBox container images"
+        2>&1 || true
+
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - a2a/Dockerfile.a2a
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/agentbox-a2a:${_IMAGE_TAG}
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/agentbox-a2a:${_IMAGE_TAG}
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        sed \
+          -e "s|REGION_PLACEHOLDER|${_REGION}|g" \
+          -e "s|PROJECT_ID|$PROJECT_ID|g" \
+          -e "s|AR_REPO_PLACEHOLDER|${_AR_REPO}|g" \
+          -e "s|IMAGE_TAG_PLACEHOLDER|${_IMAGE_TAG}|g" \
+          -e "s|GEMINI_CALLER_SA_PLACEHOLDER|${_GEMINI_CALLER_SA}|g" \
+          -e "s|SERVICE_URL_PLACEHOLDER|${_SERVICE_URL}|g" \
+          a2a/cloud_run/service.yaml | \
+        gcloud run services replace - \
+          --region ${_REGION} \
+          --platform managed
+        gcloud run services remove-iam-policy-binding agentbox-a2a \
+          --region ${_REGION} \
+          --member="allUsers" \
+          --role="roles/run.invoker" 2>/dev/null || true
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/agentbox-a2a:${_IMAGE_TAG}

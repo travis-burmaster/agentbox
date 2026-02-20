@@ -1,0 +1,66 @@
+# AgentBox A2A — Self-contained Cloud Run image
+# Bundles OpenClaw gateway + FastAPI A2A wrapper, managed by supervisord.
+# Only port 8080 (FastAPI) is exposed; the gateway on :3000 stays internal.
+
+FROM ubuntu:22.04
+
+# ─── OpenClaw version pin (matches main Dockerfile) ─────────────────────────
+ARG OPENCLAW_VERSION=2026.2.15
+ENV OPENCLAW_VERSION=${OPENCLAW_VERSION}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Non-root user (same UID as main image)
+RUN useradd -m -s /bin/bash -d /agentbox -u 1000 agentbox
+
+# System deps: Node.js 22, Python 3, supervisor
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    git \
+    python3 \
+    python3-pip \
+    supervisor \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install pinned OpenClaw from npm
+RUN npm install -g openclaw@${OPENCLAW_VERSION} --no-fund
+
+# Python deps for A2A wrapper
+COPY a2a/requirements.txt /app/a2a/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/a2a/requirements.txt
+
+# Copy A2A application code
+COPY a2a /app/a2a
+
+# Dirs and config
+RUN mkdir -p /agentbox/.openclaw/workspace /agentbox/data /agentbox/logs \
+    && chown -R agentbox:agentbox /agentbox
+
+COPY config/openclaw.json /agentbox/.openclaw/openclaw.json
+RUN chown agentbox:agentbox /agentbox/.openclaw/openclaw.json
+
+COPY a2a/supervisord.conf /etc/supervisor/conf.d/agentbox-a2a.conf
+COPY a2a/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Switch to non-root user
+USER agentbox
+
+# Verify openclaw is installed
+RUN openclaw --version
+
+ENV HOME=/agentbox
+ENV NODE_ENV=production
+ENV OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
+ENV AGENTBOX_BACKEND=cli
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -sf http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/agentbox-a2a.conf"]

@@ -314,3 +314,37 @@ openclaw config get
 - **Gateway Status**: `GATEWAY_STATUS.md` (current implementation status)
 - **OpenClaw Docs**: https://docs.openclaw.ai
 - **OpenClaw Source**: https://github.com/openclaw/openclaw
+
+## A2A Layer for Gemini Enterprise (Cloud Run)
+
+An A2A wrapper has been added under `a2a/` so Gemini Enterprise can call AgentBox as a sub-agent over JSON-RPC.
+
+### Components
+
+- `a2a/server.py`: FastAPI A2A server.
+- `a2a/agent_card.json`: served at `/.well-known/agent.json`.
+- `a2a/Dockerfile.a2a`: standalone Cloud Run image build target.
+- `a2a/cloud_run/service.yaml`: Cloud Run manifest template.
+- `a2a/cloud_run/cloudbuild.yaml`: build + deploy pipeline.
+- `a2a/cloud_run/setup.sh`: bootstrap script for APIs/IAM/deploy.
+- `a2a/README.md`: end-to-end deployment and registration guide.
+
+### Protocol behavior
+
+- `POST /` supports `tasks/send` and `tasks/get`.
+- Response format follows A2A JSON-RPC envelope with artifacts.
+- Streaming is supported through Server-Sent Events when `params.stream=true`.
+- Errors are returned as A2A JSON-RPC `error` objects (not raw stack traces).
+
+### Security and IAM
+
+- Cloud Run should be deployed with `--no-allow-unauthenticated`.
+- Wrapper validates Google-signed identity token and checks caller service account allowlist via `EXPECTED_CALLER_SA`.
+- Configure `EXPECTED_AUDIENCE` to Cloud Run service URL.
+- Do not chain inbound Gemini bearer tokens to downstream services.
+- For downstream auth, use Workload Identity and Secret Manager.
+
+### Runtime constraints
+
+- Task timeout is set to 55 minutes to fit Cloud Run 60-minute ceiling.
+- Wrapper is stateless and does not persist task lifecycle across requests.
