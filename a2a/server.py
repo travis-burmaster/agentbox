@@ -152,8 +152,15 @@ def _validate_google_token(authz_header: Optional[str]) -> Optional[str]:
 
     email = claims.get("email")
     email_verified = claims.get("email_verified")
-    if not email or not email_verified:
-        return "Token does not include a verified caller email"
+    # Service account tokens may have email but not email_verified.
+    # Impersonated SA tokens may lack email entirely — fall back to sub claim.
+    if not email:
+        # Try to resolve email from sub or azp for SA tokens
+        sub = claims.get("sub", "")
+        logger.info("token claims (no email): iss=%s sub=%s azp=%s", claims.get("iss"), sub, claims.get("azp"))
+        return "Token does not include a caller email"
+    if email_verified is False:
+        return "Token email is explicitly not verified"
 
     if email not in expected_callers:
         return f"Caller {email} is not in EXPECTED_CALLER_SA allowlist"
@@ -163,9 +170,9 @@ def _validate_google_token(authz_header: Optional[str]) -> Optional[str]:
 
 async def _invoke_openclaw(task_text: str) -> str:
     backend = os.getenv("AGENTBOX_BACKEND", "cli").strip().lower()
-    gateway_url = os.getenv("AGENTBOX_GATEWAY_URL", DEFAULT_GATEWAY_URL).rstrip("/")
 
     if backend == "gateway":
+        gateway_url = os.getenv("AGENTBOX_GATEWAY_URL", DEFAULT_GATEWAY_URL).rstrip("/")
         payload = {
             "event": "external_task",
             "text": task_text,
@@ -179,7 +186,9 @@ async def _invoke_openclaw(task_text: str) -> str:
                 return str(data.get("text") or data.get("message") or data)
             return str(data)
 
-    cmd = ["openclaw", "system", "event", "--text", task_text, "--mode", "now"]
+    agent_name = os.getenv("OPENCLAW_AGENT", "main")
+    cmd = ["openclaw", "agent", "--agent", agent_name, "--message", task_text]
+    logger.info("invoking openclaw cli: %s", " ".join(cmd[:4] + ["..."]))
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -198,7 +207,7 @@ async def _invoke_openclaw(task_text: str) -> str:
     if proc.returncode != 0:
         raise RuntimeError(f"OpenClaw CLI failed ({proc.returncode}): {err or out or 'unknown error'}")
 
-    return out or err or "Task accepted by OpenClaw"
+    return out or err or "Task completed"
 
 
 async def _stream_a2a_response(rpc_id: Optional[Union[str, int]], task_id: str) -> AsyncIterator[bytes]:
@@ -246,11 +255,27 @@ async def health() -> JSONResponse:
         issues.append("EXPECTED_AUDIENCE not configured")
     if not os.getenv("EXPECTED_CALLER_SA"):
         issues.append("EXPECTED_CALLER_SA not configured")
+
+    # Check gateway readiness via TCP when in gateway mode
+    backend = os.getenv("AGENTBOX_BACKEND", "cli").strip().lower()
+    if backend == "gateway":
+        import socket
+        from urllib.parse import urlparse
+        gateway_url = os.getenv("AGENTBOX_GATEWAY_URL", DEFAULT_GATEWAY_URL).rstrip("/")
+        parsed = urlparse(gateway_url)
+        gw_host = parsed.hostname or "localhost"
+        gw_port = parsed.port or 3000
+        try:
+            sock = socket.create_connection((gw_host, gw_port), timeout=3)
+            sock.close()
+        except OSError:
+            issues.append(f"OpenClaw gateway not reachable at {gw_host}:{gw_port}")
+
     ok = not issues
-    return JSONResponse({"status": "ok" if ok else "misconfigured", "issues": issues}, status_code=200 if ok else 500)
+    return JSONResponse({"status": "ok" if ok else "unhealthy", "issues": issues}, status_code=200 if ok else 503)
 
 
-@app.post("/")
+@app.post("/", response_model=None)
 async def a2a_root(request: Request) -> JSONResponse | StreamingResponse:
     authz_header = request.headers.get("Authorization")
     auth_err = await asyncio.to_thread(_validate_google_token, authz_header)

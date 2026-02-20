@@ -8,6 +8,12 @@ Deploy AgentBox as a Gemini Enterprise sub-agent on Google Cloud Run using the
 
 ## Architecture
 
+
+The A2A container is **self-contained** — it bundles both the OpenClaw gateway
+and the FastAPI A2A wrapper in a single image, managed by supervisord.
+Only port 8080 (FastAPI) is exposed; the OpenClaw gateway on port 3000 stays
+internal to the container.
+
 ```
 ┌──────────────────────────────────┐
 │  Gemini Enterprise               │
@@ -16,24 +22,30 @@ Deploy AgentBox as a Gemini Enterprise sub-agent on Google Cloud Run using the
                  │  HTTPS  A2A JSON-RPC
                  │  IAM identity token (Bearer)
                  ▼
-┌──────────────────────────────────┐
-│  Cloud Run: agentbox-a2a         │  ← this directory
-│  FastAPI A2A wrapper             │
-│  ● GET  /.well-known/agent.json  │
-│  ● POST /  (tasks/send, get)     │
-│  ● IAM token validation (2-layer)│
-└────────────────┬─────────────────┘
-                 │  localhost (CLI or gateway REST)
-                 ▼
-┌──────────────────────────────────┐
-│  AgentBox / OpenClaw runtime     │
-│  openclaw system event --text …  │
-└──────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  Cloud Run: agentbox-a2a (single container)  │
+│                                              │
+│  ┌─ supervisord ───────────────────────────┐ │
+│  │                                         │ │
+│  │  [uvicorn-a2a]        :8080 (external)  │ │
+│  │   FastAPI A2A wrapper                   │ │
+│  │   ● GET  /.well-known/agent.json        │ │
+│  │   ● POST /  (tasks/send, get)           │ │
+│  │   ● IAM token validation (2-layer)      │ │
+│  │        │                                │ │
+│  │        │ localhost:3000                  │ │
+│  │        ▼                                │ │
+│  │  [openclaw-gateway]   :3000 (internal)  │ │
+│  │   OpenClaw runtime                      │ │
+│  │                                         │ │
+│  └─────────────────────────────────────────┘ │
+└──────────────────────────────────────────────┘
 ```
 
 **Security: two-layer lock**
 1. **Cloud Run IAM** — `--no-allow-unauthenticated`; only Gemini Enterprise SA has `roles/run.invoker`
 2. **App-level** — server checks Bearer token is Google-signed AND `token.email == EXPECTED_CALLER_SA`
+3. **Internal gateway** — OpenClaw gateway on port 3000 is never exposed externally
 
 ---
 
@@ -140,15 +152,17 @@ export GEMINI_CALLER_SA="service-XXXX@gcp-sa-discoveryengine.iam.gserviceaccount
 
 ## Step 4 — Test locally with Docker (optional but recommended)
 
+The image is self-contained: supervisord starts both the OpenClaw gateway
+(port 3000, internal) and the FastAPI A2A wrapper (port 8080, exposed).
+
 ```bash
-# Build the A2A image locally
+# Build the A2A image locally (includes Node.js + OpenClaw + Python + supervisord)
 docker build -f a2a/Dockerfile.a2a -t agentbox-a2a:local .
 
 # Run locally — skip real token validation by setting a dummy audience
 docker run --rm -p 8080:8080 \
   -e EXPECTED_AUDIENCE="http://localhost:8080" \
   -e EXPECTED_CALLER_SA="test@test.com" \
-  -e AGENTBOX_BACKEND="cli" \
   agentbox-a2a:local
 
 # In a second terminal — test the health endpoint
@@ -323,6 +337,9 @@ gcloud builds submit \
   --substitutions "_REGION=${REGION},_GEMINI_CALLER_SA=${GEMINI_CALLER_SA},_SERVICE_URL=${SERVICE_URL}" \
   --project "${PROJECT_ID}" \
   .
+
+
+ gcloud run deploy agentbox-a2a --image "${REGION}-docker.pkg.dev/${PROJECT_ID}/agentbox/agentbox-a2a:latest" --region "${REGION}"  --platform managed --no-allow-unauthenticated --cpu 2  --memory 1Gi  --timeout 3300 --concurrency 10  --execution-environment gen2 --set-env-vars "AGENTBOX_BACKEND=gateway,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},EXPECTED_CALLER_SA=${GEMINI_CALLER_SA}" --service-account "agentbox-a2a@${PROJECT_ID}.iam.gserviceaccount.com" 
 ```
 
 ---
@@ -333,8 +350,8 @@ gcloud builds submit \
 |----------|----------|-------------|
 | `EXPECTED_AUDIENCE` | ✅ | Cloud Run service URL (e.g. `https://agentbox-a2a-xxxx.a.run.app`) |
 | `EXPECTED_CALLER_SA` | ✅ | Gemini Enterprise service account email (comma-separated for multiple) |
+| `AGENTBOX_BACKEND` | optional | `gateway` (default) or `cli` |
 | `AGENTBOX_GATEWAY_URL` | optional | OpenClaw gateway URL (default: `http://localhost:3000`) |
-| `AGENTBOX_BACKEND` | optional | `cli` (default) or `gateway` |
 | `GOOGLE_CLOUD_PROJECT` | optional | GCP project ID for logging |
 | `SERVICE_URL` | optional | Alias for `EXPECTED_AUDIENCE` |
 
