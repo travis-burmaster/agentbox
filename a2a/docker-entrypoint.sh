@@ -157,6 +157,20 @@ else
   log "Onboard complete"
 fi
 
+# ── 6b. Ensure Slack DM access is configured ─────────────────────────────────
+# If SLACK_ALLOW_FROM is set, configure the Slack DM allowlist.
+# Use "*" to allow all users, or comma-separated Slack user IDs.
+SLACK_ALLOW_FROM="${SLACK_ALLOW_FROM:-*}"
+if command -v openclaw &>/dev/null; then
+  openclaw config set channels.slack.dm.enabled true 2>/dev/null || true
+  openclaw config set channels.slack.dm.policy open 2>/dev/null || true
+  # Set allowFrom as a JSON array
+  ALLOW_JSON=$(echo "${SLACK_ALLOW_FROM}" | tr ',' '\n' | jq -R . | jq -s .)
+  openclaw config set channels.slack.dm.allowFrom "${ALLOW_JSON}" 2>/dev/null || true
+  openclaw config set channels.slack.groupPolicy open 2>/dev/null || true
+  log "Slack DM access configured (allowFrom=${SLACK_ALLOW_FROM})"
+fi
+
 # ── 7. Shred decrypted secrets (never leave plaintext on disk) ───────────────
 shred -u "${SECRETS_JSON}" 2>/dev/null || rm -f "${SECRETS_JSON}"
 log "Decrypted secrets file shredded"
