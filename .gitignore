@@ -16,8 +16,10 @@ secrets/*.env
 secrets/*.txt
 secrets/*.json
 secrets/secrets.*
+secrets.json          # root-level decrypted secrets bundle (NEVER commit)
 .env
 .env.*
+!.env.example
 *.env.local
 
 # Backup directories

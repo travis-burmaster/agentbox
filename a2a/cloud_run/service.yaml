@@ -10,13 +10,13 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "0"
-        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "3"
         run.googleapis.com/cpu-throttling: "false"
         run.googleapis.com/execution-environment: gen2
     spec:
       serviceAccountName: agentbox-a2a@PROJECT_ID.iam.gserviceaccount.com
-      containerConcurrency: 10
+      containerConcurrency: 5
       timeoutSeconds: 3300
       containers:
         - image: REGION_PLACEHOLDER-docker.pkg.dev/PROJECT_ID/AR_REPO_PLACEHOLDER/agentbox-a2a:IMAGE_TAG_PLACEHOLDER
@@ -25,16 +25,19 @@ spec:
           resources:
             limits:
               cpu: "2"
-              memory: 1Gi
+              memory: 2Gi
           startupProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 12
+            failureThreshold: 24
             timeoutSeconds: 5
           env:
+            # ── Plain env vars (not sensitive) ───────────────────────────────
+            - name: WORKSPACE_REPO
+              value: travis-burmaster/agentbox-workspace   # override per deployment
             - name: AGENTBOX_BACKEND
               value: cli
             - name: GOOGLE_CLOUD_PROJECT
@@ -43,3 +46,17 @@ spec:
               value: SERVICE_URL_PLACEHOLDER
             - name: EXPECTED_CALLER_SA
               value: GEMINI_CALLER_SA_PLACEHOLDER
+
+            # ── Secrets (only 2 from Secret Manager) ─────────────────────────
+            # All other credentials live in secrets_encrypted.enc inside the
+            # workspace repo and are decrypted at startup using ENCRYPTION_KEY.
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agentbox-github-token
+                  key: latest
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agentbox-encryption-key
+                  key: latest
