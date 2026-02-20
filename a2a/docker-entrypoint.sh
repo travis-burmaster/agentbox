@@ -13,7 +13,7 @@ set -euo pipefail
 WORKSPACE_DIR="/agentbox/.openclaw/workspace"
 CONFIG_PATH="/agentbox/.openclaw/openclaw.json"
 OPENCLAW_HOME="/agentbox/.openclaw"
-SECRETS_ENC_FILE="backup/secrets_encrypted.enc"
+SECRETS_ENC_FILE=""  # resolved below to latest backup run
 SECRETS_JSON="/agentbox/secrets_decrypted.json"
 
 log() { echo "[entrypoint] $*"; }
@@ -50,10 +50,25 @@ WORKSPACE_SHA=$(git -C "${WORKSPACE_DIR}" rev-parse --short HEAD)
 log "Workspace ready @ ${WORKSPACE_SHA}"
 
 # ── 4. Decrypt secrets bundle ─────────────────────────────────────────────────
-SECRETS_ENC_PATH="${WORKSPACE_DIR}/${SECRETS_ENC_FILE}"
+# Resolve the latest backup run (follow backup/latest symlink or find newest run)
+if [ -L "${WORKSPACE_DIR}/backup/latest" ] || [ -d "${WORKSPACE_DIR}/backup/latest" ]; then
+  # latest may be a symlink with an absolute path from the backup machine — resolve by finding newest run
+  LATEST_RUN=$(ls -1d "${WORKSPACE_DIR}"/backup/runs/*/ 2>/dev/null | sort | tail -1)
+else
+  LATEST_RUN=""
+fi
 
-if [ ! -f "${SECRETS_ENC_PATH}" ]; then
-  log "ERROR: ${SECRETS_ENC_FILE} not found in workspace repo"
+if [ -n "${LATEST_RUN}" ] && [ -f "${LATEST_RUN}/secrets_encrypted.enc" ]; then
+  SECRETS_ENC_PATH="${LATEST_RUN}/secrets_encrypted.enc"
+  log "Using backup run: $(basename "${LATEST_RUN}")"
+elif [ -f "${WORKSPACE_DIR}/backup/secrets_encrypted.enc" ]; then
+  SECRETS_ENC_PATH="${WORKSPACE_DIR}/backup/secrets_encrypted.enc"
+  log "Using root-level backup/secrets_encrypted.enc"
+elif [ -f "${WORKSPACE_DIR}/secrets_encrypted.enc" ]; then
+  SECRETS_ENC_PATH="${WORKSPACE_DIR}/secrets_encrypted.enc"
+  log "Using workspace root secrets_encrypted.enc"
+else
+  log "ERROR: secrets_encrypted.enc not found in workspace repo"
   exit 1
 fi
 
