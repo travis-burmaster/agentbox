@@ -250,11 +250,12 @@ async def agent_card(request: Request) -> JSONResponse:
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    issues = []
+    warnings = []
+    errors = []
     if not (os.getenv("EXPECTED_AUDIENCE") or os.getenv("SERVICE_URL")):
-        issues.append("EXPECTED_AUDIENCE not configured")
+        warnings.append("EXPECTED_AUDIENCE not configured (auth disabled)")
     if not os.getenv("EXPECTED_CALLER_SA"):
-        issues.append("EXPECTED_CALLER_SA not configured")
+        warnings.append("EXPECTED_CALLER_SA not configured (auth disabled)")
 
     # Check gateway readiness via TCP when in gateway mode
     backend = os.getenv("AGENTBOX_BACKEND", "cli").strip().lower()
@@ -269,10 +270,16 @@ async def health() -> JSONResponse:
             sock = socket.create_connection((gw_host, gw_port), timeout=3)
             sock.close()
         except OSError:
-            issues.append(f"OpenClaw gateway not reachable at {gw_host}:{gw_port}")
+            errors.append(f"OpenClaw gateway not reachable at {gw_host}:{gw_port}")
 
-    ok = not issues
-    return JSONResponse({"status": "ok" if ok else "unhealthy", "issues": issues}, status_code=200 if ok else 503)
+    # Only hard errors fail the startup probe; missing auth config is a warning
+    ok = not errors
+    body: dict = {"status": "ok" if ok else "unhealthy"}
+    if errors:
+        body["errors"] = errors
+    if warnings:
+        body["warnings"] = warnings
+    return JSONResponse(body, status_code=200 if ok else 503)
 
 
 @app.post("/", response_model=None)
