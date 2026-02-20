@@ -113,13 +113,29 @@ done < <(jq -r "${ENV_FILTER}"' | to_entries[]
 # The backup stores base64-encoded files under .openclaw_state.files
 # Paths are relative to OPENCLAW_HOME (e.g. agents/<id>/agent/auth.json)
 if jq -e '.openclaw_state.files // empty' "${SECRETS_JSON}" >/dev/null 2>&1; then
+  # Get the original OPENCLAW_HOME from the backup to rewrite paths
+  BACKUP_ROOT=$(jq -r '.openclaw_state.root // empty' "${SECRETS_JSON}")
+
   log "Restoring openclaw state files..."
   while IFS=$'\t' read -r relpath b64content; do
     dest="${OPENCLAW_HOME}/${relpath}"
     mkdir -p "$(dirname "${dest}")"
     echo "${b64content}" | base64 -d > "${dest}"
     chmod 600 "${dest}"
-    log "  restored ${relpath}"
+
+    # Rewrite hardcoded paths from backup machine to container paths
+    if [ -n "${BACKUP_ROOT}" ] && [ "${BACKUP_ROOT}" != "${OPENCLAW_HOME}" ]; then
+      BACKUP_HOME=$(dirname "${BACKUP_ROOT}")
+      if grep -q "${BACKUP_HOME}" "${dest}" 2>/dev/null; then
+        sed -i "s|${BACKUP_ROOT}|${OPENCLAW_HOME}|g" "${dest}"
+        sed -i "s|${BACKUP_HOME}|/agentbox|g" "${dest}"
+        log "  restored ${relpath} (paths rewritten)"
+      else
+        log "  restored ${relpath}"
+      fi
+    else
+      log "  restored ${relpath}"
+    fi
   done < <(jq -r '.openclaw_state.files | to_entries[] | "\(.key)\t\(.value.content)"' "${SECRETS_JSON}")
 fi
 
