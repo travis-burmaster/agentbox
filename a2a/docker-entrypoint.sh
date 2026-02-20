@@ -12,7 +12,8 @@ set -euo pipefail
 
 WORKSPACE_DIR="/agentbox/.openclaw/workspace"
 CONFIG_PATH="/agentbox/.openclaw/openclaw.json"
-SECRETS_ENC_FILE="secrets_encrypted.enc"
+OPENCLAW_HOME="/agentbox/.openclaw"
+SECRETS_ENC_FILE="backup/secrets_encrypted.enc"
 SECRETS_JSON="/agentbox/secrets_decrypted.json"
 
 log() { echo "[entrypoint] $*"; }
@@ -64,29 +65,44 @@ chmod 600 "${SECRETS_JSON}"
 log "Secrets decrypted"
 
 # ── 5. Extract credentials from decrypted JSON ───────────────────────────────
-get_secret() { jq -r --arg k "$1" '.[$k] // empty' "${SECRETS_JSON}"; }
+# The backup JSON may use either:
+#   a) flat layout:   { "anthropic_api_key": "..." }
+#   b) nested layout: { "env": { "anthropic_api_key": "..." }, "openclaw_state": {...} }
+if jq -e '.env' "${SECRETS_JSON}" >/dev/null 2>&1; then
+  ENV_FILTER='.env'
+else
+  ENV_FILTER='.'
+fi
+
+get_secret() { jq -r --arg k "$1" "${ENV_FILTER}"'[$k] // empty' "${SECRETS_JSON}"; }
 
 ANTHROPIC_API_KEY=$(get_secret "anthropic_api_key")
 OPENCLAW_GATEWAY_TOKEN=$(get_secret "openclaw_gateway_token")
 
-# Export all secrets as env vars for skills (openclaw picks these up)
-# Add new skills here — they just need their key added to secrets.json + re-encrypt
-export SMTP_HOST=$(get_secret "smtp_host")
-export SMTP_PORT=$(get_secret "smtp_port")
-export SMTP_USER=$(get_secret "smtp_user")
-export SMTP_PASSWORD=$(get_secret "smtp_password")
-export SMTP_FROM=$(get_secret "smtp_from")
-export NOTION_SECRET=$(get_secret "notion_secret")
-export TELEGRAM_BOT_TOKEN=$(get_secret "telegram_bot_token")
-
-# Any additional skill secrets are exported dynamically
-# (all keys not in the reserved list are exported as-is)
-RESERVED_KEYS='["anthropic_api_key","openclaw_gateway_token","smtp_host","smtp_port","smtp_user","smtp_password","smtp_from","notion_secret","telegram_bot_token"]'
+# Export every key from the env object as an uppercase env var
+# (except encryption_key which should not be re-exported)
 while IFS="=" read -r key value; do
+  [[ -z "${key}" ]] && continue
   export "${key}=${value}"
-done < <(jq -r --argjson reserved "${RESERVED_KEYS}" \
-  'to_entries | map(select(.key as $k | $reserved | index($k) | not)) | .[] | "\(.key | ascii_upcase)=\(.value)"' \
-  "${SECRETS_JSON}")
+  log "  exported ${key}"
+done < <(jq -r "${ENV_FILTER}"' | to_entries[]
+  | select(.key != "encryption_key")
+  | select(.value | type == "string")
+  | "\(.key | ascii_upcase)=\(.value)"' "${SECRETS_JSON}")
+
+# ── 5b. Restore openclaw state files (auth providers, models, etc.) ──────
+# The backup stores base64-encoded files under .openclaw_state.files
+# Paths are relative to OPENCLAW_HOME (e.g. agents/<id>/agent/auth.json)
+if jq -e '.openclaw_state.files // empty' "${SECRETS_JSON}" >/dev/null 2>&1; then
+  log "Restoring openclaw state files..."
+  while IFS=$'\t' read -r relpath b64content; do
+    dest="${OPENCLAW_HOME}/${relpath}"
+    mkdir -p "$(dirname "${dest}")"
+    echo "${b64content}" | base64 -d > "${dest}"
+    chmod 600 "${dest}"
+    log "  restored ${relpath}"
+  done < <(jq -r '.openclaw_state.files | to_entries[] | "\(.key)\t\(.value.content)"' "${SECRETS_JSON}")
+fi
 
 # ── 6. Run headless onboard ───────────────────────────────────────────────────
 if [ -z "${ANTHROPIC_API_KEY}" ]; then
