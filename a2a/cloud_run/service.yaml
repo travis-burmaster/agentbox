@@ -37,7 +37,7 @@ spec:
           env:
             # ── Plain env vars (not sensitive) ───────────────────────────────
             - name: WORKSPACE_REPO
-              value: travis-burmaster/agentbox-workspace   # override per deployment
+              value: travis-burmaster/agentbox-config   # override per deployment
             - name: AGENTBOX_BACKEND
               value: cli
             - name: GOOGLE_CLOUD_PROJECT

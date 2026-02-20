@@ -26,7 +26,8 @@ log() { echo "[entrypoint] $*"; }
 log "Workspace repo: ${WORKSPACE_REPO}"
 
 # ── 2. Auth gh CLI + configure git ───────────────────────────────────────────
-echo "${GITHUB_TOKEN}" | gh auth login --with-token
+# gh CLI auto-detects GITHUB_TOKEN env var, so no explicit login needed.
+# Configure git for workspace repo push/pull.
 git config --global user.email "agentbox@northramp.com"
 git config --global user.name "AgentBox Cloud Run"
 git config --global credential.helper "store --file /agentbox/.git-credentials"
