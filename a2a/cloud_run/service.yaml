@@ -46,6 +46,9 @@ spec:
               value: SERVICE_URL_PLACEHOLDER
             - name: EXPECTED_CALLER_SA
               value: GEMINI_CALLER_SA_PLACEHOLDER
+            # ── One-shot pairing (remove after approved) ───────────────
+            - name: SLACK_PAIRING_CODE
+              value: ""   # set to pairing code, deploy, then clear
 
             # ── Secrets (only 2 from Secret Manager) ─────────────────────────
             # All other credentials live in secrets_encrypted.enc inside the
