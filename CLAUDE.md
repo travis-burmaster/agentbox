@@ -477,6 +477,52 @@ configured (idempotent — safe on warm restarts).
 - Wrapper is stateless; session state persists via workspace repo git commits
 - Gateway runs on `:3000` (internal only); only `:8080` (FastAPI) is exposed
 
+### Slack integration
+
+OpenClaw supports two Slack modes. **Socket Mode is recommended for Cloud Run.**
+
+| Mode | How it works | Cloud Run compatible |
+|------|-------------|---------------------|
+| **Socket Mode** (default) | Gateway connects OUT to Slack via WebSocket. No inbound URL needed. | ✅ Yes — works out of the box |
+| **HTTP Events API** | Slack POSTs events to a public URL. Needs inbound webhook. | ✅ Yes — proxy endpoints built into `server.py` |
+
+**Socket Mode setup (add to `secrets.json` → re-encrypt):**
+
+```json
+{
+  "slack_app_token": "xapp-...",
+  "slack_bot_token": "xoxb-...",
+  "slack_signing_secret": "..."
+}
+```
+
+The entrypoint exports these as `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN` env vars.
+OpenClaw reads them automatically — no `openclaw.json` changes needed.
+
+**Slack App configuration (Socket Mode):**
+1. Create Slack App at api.slack.com
+2. Enable Socket Mode → generate App Token (`xapp-...`, scope: `connections:write`)
+3. Install app → copy Bot Token (`xoxb-...`)
+4. Subscribe bot events: `app_mention`, `message.im`, `message.channels`, `message.groups`
+5. Enable App Home → Messages Tab
+
+**HTTP Events API mode (fallback):**
+Set `channels.slack.mode = "http"` in `openclaw.json` and point these Slack URLs
+to your Cloud Run service:
+- Event Subscriptions: `https://SERVICE_URL/slack/events`
+- Interactivity: `https://SERVICE_URL/slack/interactivity`
+- Slash Commands: `https://SERVICE_URL/slack/commands`
+
+`server.py` proxies all three paths to the internal gateway at `localhost:3000`.
+Requests are verified with HMAC-SHA256 using `SLACK_SIGNING_SECRET`.
+
+### Adding other channels
+
+Same pattern for any OpenClaw channel — add tokens to `secrets.json`, re-encrypt,
+add export block to `docker-entrypoint.sh`. Channels that use Socket/WebSocket
+(Slack, Discord) work without proxy changes. HTTP-only channels need a proxy
+endpoint added to `server.py` following the `_slack_proxy` pattern.
+
 ### Local development
 
 ```bash

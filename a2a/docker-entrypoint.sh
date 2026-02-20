@@ -79,6 +79,22 @@ export SMTP_FROM=$(get_secret "smtp_from")
 export NOTION_SECRET=$(get_secret "notion_secret")
 export TELEGRAM_BOT_TOKEN=$(get_secret "telegram_bot_token")
 
+# ── Slack channel (Socket Mode — default) ────────────────────────────────────
+# OpenClaw reads SLACK_APP_TOKEN + SLACK_BOT_TOKEN env vars automatically.
+# Socket Mode: gateway connects OUT to Slack via WebSocket — no inbound webhook needed.
+# HTTP mode: set channels.slack.mode=http in openclaw.json + configure /slack/events URL.
+SLACK_APP_TOKEN=$(get_secret "slack_app_token")
+SLACK_BOT_TOKEN=$(get_secret "slack_bot_token")
+SLACK_SIGNING_SECRET=$(get_secret "slack_signing_secret")
+
+if [ -n "${SLACK_APP_TOKEN}" ] && [ -n "${SLACK_BOT_TOKEN}" ]; then
+  export SLACK_APP_TOKEN SLACK_BOT_TOKEN
+  [ -n "${SLACK_SIGNING_SECRET}" ] && export SLACK_SIGNING_SECRET
+  log "Slack configured (Socket Mode — tokens exported)"
+else
+  log "Slack tokens not found in secrets bundle — Slack channel disabled"
+fi
+
 # Any additional skill secrets are exported dynamically
 # (all keys not in the reserved list are exported as-is)
 RESERVED_KEYS='["anthropic_api_key","openclaw_gateway_token","smtp_host","smtp_port","smtp_user","smtp_password","smtp_from","notion_secret","telegram_bot_token"]'

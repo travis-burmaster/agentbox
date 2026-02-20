@@ -1,13 +1,16 @@
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -273,6 +276,101 @@ async def health() -> JSONResponse:
 
     ok = not issues
     return JSONResponse({"status": "ok" if ok else "unhealthy", "issues": issues}, status_code=200 if ok else 503)
+
+
+def _verify_slack_signature(body: bytes, timestamp: str, signature: str) -> bool:
+    """Verify Slack request signature (HMAC-SHA256). Required for HTTP Events API mode."""
+    signing_secret = os.getenv("SLACK_SIGNING_SECRET", "")
+    if not signing_secret:
+        logger.warning("SLACK_SIGNING_SECRET not set — skipping signature check (not secure for production)")
+        return True  # allow through; operator must set the secret
+
+    try:
+        if abs(time.time() - float(timestamp)) > 300:  # 5-minute replay window
+            return False
+        sig_basestring = f"v0:{timestamp}:{body.decode('utf-8')}"
+        expected = "v0=" + hmac.new(
+            signing_secret.encode(),
+            sig_basestring.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _slack_proxy(request: Request, path: str) -> Response:
+    """
+    Proxy Slack inbound HTTP events to the internal OpenClaw gateway.
+    Used when Slack channel is configured in HTTP Events API mode.
+    Socket Mode (default) does not use this — the gateway connects out to Slack.
+    """
+    body = await request.body()
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    signature = request.headers.get("X-Slack-Signature", "")
+
+    if not _verify_slack_signature(body, timestamp, signature):
+        logger.warning("slack signature verification failed path=%s", path)
+        return Response(content="Unauthorized", status_code=403)
+
+    # Handle Slack URL verification challenge (sent when first configuring endpoint)
+    try:
+        payload = json.loads(body)
+        if payload.get("type") == "url_verification":
+            return JSONResponse({"challenge": payload.get("challenge")})
+    except Exception:  # noqa: BLE001
+        pass  # Not JSON — forward as-is (e.g. slash command form payload)
+
+    gateway_url = os.getenv("AGENTBOX_GATEWAY_URL", DEFAULT_GATEWAY_URL).rstrip("/")
+    forward_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in {"host", "content-length"}
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{gateway_url}/{path}",
+                content=body,
+                headers=forward_headers,
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type=resp.headers.get("content-type", "application/json"),
+        )
+    except httpx.ConnectError:
+        logger.error("slack proxy: could not reach internal gateway at %s", gateway_url)
+        return Response(content="Gateway unavailable", status_code=503)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("slack proxy error path=%s error=%s", path, exc)
+        return Response(content="Internal error", status_code=500)
+
+
+# ── Slack HTTP Events API proxy endpoints ─────────────────────────────────────
+# These are only used when Slack is configured in HTTP mode.
+# Default (Socket Mode): the gateway connects out to Slack — no proxy needed.
+# Set channels.slack.mode="http" in openclaw.json to use these endpoints.
+
+@app.post("/slack/events")
+async def slack_events(request: Request) -> Response:
+    """Slack Event Subscriptions + App Home webhook."""
+    return await _slack_proxy(request, "slack/events")
+
+
+@app.post("/slack/interactivity")
+async def slack_interactivity(request: Request) -> Response:
+    """Slack interactive components (buttons, modals, shortcuts)."""
+    return await _slack_proxy(request, "slack/interactivity")
+
+
+@app.post("/slack/commands")
+async def slack_commands(request: Request) -> Response:
+    """Slack slash commands."""
+    return await _slack_proxy(request, "slack/commands")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @app.post("/", response_model=None)
