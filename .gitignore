@@ -17,6 +17,7 @@ secrets/*.txt
 secrets/*.json
 secrets/secrets.*
 secrets.json          # root-level decrypted secrets bundle (NEVER commit)
+secrets_decrypted.json # entrypoint decrypted output (NEVER commit)
 .env
 .env.*
 !.env.example
@@ -66,6 +67,9 @@ logs/
 # Session transcripts (may contain sensitive data)
 sessions/
 *.jsonl
+
+# Claude Code local settings (may embed tokens in permission rules)
+.claude/
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VM / Container Files

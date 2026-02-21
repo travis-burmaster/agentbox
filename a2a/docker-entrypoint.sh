@@ -31,13 +31,11 @@ log "Workspace repo: ${WORKSPACE_REPO}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-agentbox@noreply.github.com}"
 git config --global user.name "${GIT_AUTHOR_NAME:-AgentBox Cloud Run}"
 
-# Use /dev/shm (tmpfs — never touches persistent disk, wiped on exit) for the
-# git askpass helper so GITHUB_TOKEN is never written to a credential file.
-_GIT_ASKPASS=$(mktemp /dev/shm/.git-askpass-XXXXXX)
-printf '#!/bin/sh\nprintf "%%s\\n" "${GITHUB_TOKEN}"\n' > "${_GIT_ASKPASS}"
-chmod 700 "${_GIT_ASKPASS}"
-export GIT_ASKPASS="${_GIT_ASKPASS}"
-export GIT_USERNAME="x-access-token"
+# Configure git credential store — token is written to a file that is
+# chmod 600 and shredded at the end of the boot sequence.
+git config --global credential.helper "store --file /agentbox/.git-credentials"
+echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > /agentbox/.git-credentials
+chmod 600 /agentbox/.git-credentials
 export GIT_TERMINAL_PROMPT=0
 
 # ── 3. Clone or update workspace repo ────────────────────────────────────────
