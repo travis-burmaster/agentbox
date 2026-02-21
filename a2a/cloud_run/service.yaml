@@ -37,7 +37,7 @@ spec:
           env:
             # ── Plain env vars (not sensitive) ───────────────────────────────
             - name: WORKSPACE_REPO
-              value: travis-burmaster/agentbox-config   # override per deployment
+              value: WORKSPACE_REPO_PLACEHOLDER
             - name: AGENTBOX_BACKEND
               value: cli
             - name: GOOGLE_CLOUD_PROJECT
@@ -46,6 +46,10 @@ spec:
               value: SERVICE_URL_PLACEHOLDER
             - name: EXPECTED_CALLER_SA
               value: GEMINI_CALLER_SA_PLACEHOLDER
+            - name: SMTP_FROM
+              value: SMTP_FROM_PLACEHOLDER
+            - name: WORKSPACE_SYNC_INTERVAL
+              value: "60"   # seconds between memory sync to GitHub
             # ── One-shot pairing (remove after approved) ───────────────
             - name: SLACK_PAIRING_CODE
               value: ""   # set to pairing code, deploy, then clear

@@ -28,8 +28,8 @@ log "Workspace repo: ${WORKSPACE_REPO}"
 # ── 2. Auth gh CLI + configure git ───────────────────────────────────────────
 # gh CLI auto-detects GITHUB_TOKEN env var, so no explicit login needed.
 # Configure git for workspace repo push/pull.
-git config --global user.email "agentbox@northramp.com"
-git config --global user.name "AgentBox Cloud Run"
+git config --global user.email "${GIT_AUTHOR_EMAIL:-agentbox@noreply.github.com}"
+git config --global user.name "${GIT_AUTHOR_NAME:-AgentBox Cloud Run}"
 git config --global credential.helper "store --file /agentbox/.git-credentials"
 echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > /agentbox/.git-credentials
 chmod 600 /agentbox/.git-credentials
@@ -195,11 +195,55 @@ SLACK_ALLOW_FROM="${SLACK_ALLOW_FROM:-*}"
 if command -v openclaw &>/dev/null; then
   openclaw config set channels.slack.dm.enabled true 2>/dev/null || true
   openclaw config set channels.slack.dm.policy open 2>/dev/null || true
-  # Set allowFrom as a JSON array
+  # Set allowFrom as a JSON array (top-level channels.slack.allowFrom per newer schema)
   ALLOW_JSON=$(echo "${SLACK_ALLOW_FROM}" | tr ',' '\n' | jq -R . | jq -s .)
-  openclaw config set channels.slack.dm.allowFrom "${ALLOW_JSON}" 2>/dev/null || true
+  openclaw config set channels.slack.allowFrom "${ALLOW_JSON}" 2>/dev/null || true
   openclaw config set channels.slack.groupPolicy open 2>/dev/null || true
+  # Run doctor --fix to apply any schema migrations
+  openclaw doctor --fix 2>/dev/null || true
   log "Slack DM access configured (allowFrom=${SLACK_ALLOW_FROM})"
+fi
+
+# ── 6c. Configure Himalaya email skill (SMTP2GO) ─────────────────────────────
+SMTP_FROM="${SMTP_FROM:-}"
+if [ -n "${SMTP_FROM}" ] && [ -n "${SMTP2GO_USER:-}" ] && [ -n "${SMTP2GO_PASS:-}" ] && command -v himalaya &>/dev/null; then
+  HIMALAYA_CONFIG_DIR="/agentbox/.config/himalaya"
+  mkdir -p "${HIMALAYA_CONFIG_DIR}"
+  MAILDIR_ROOT="/agentbox/.local/share/himalaya/maildir"
+  mkdir -p "${MAILDIR_ROOT}/cur" "${MAILDIR_ROOT}/new" "${MAILDIR_ROOT}/tmp"
+  mkdir -p "${MAILDIR_ROOT}/Sent/cur" "${MAILDIR_ROOT}/Sent/new" "${MAILDIR_ROOT}/Sent/tmp"
+
+  cat > "${HIMALAYA_CONFIG_DIR}/config.toml" <<TOML
+[accounts.default]
+email = "${SMTP_FROM}"
+display-name = "AgentBox"
+default = true
+
+# Local maildir for storing sent copies
+backend.type = "maildir"
+backend.root = "${MAILDIR_ROOT}"
+
+# SMTP relay via SMTP2GO
+message.send.backend.type = "smtp"
+message.send.backend.host = "mail.smtp2go.com"
+message.send.backend.port = 2525
+message.send.backend.encryption.type = "start-tls"
+message.send.backend.login = "${SMTP2GO_USER}"
+message.send.backend.auth.type = "password"
+message.send.backend.auth.cmd = "printenv SMTP2GO_PASS"
+TOML
+  chmod 600 "${HIMALAYA_CONFIG_DIR}/config.toml"
+
+  # Enable the himalaya skill in openclaw config
+  # HIMALAYA_CONFIG is the env var himalaya CLI actually reads for config path
+  openclaw config set skills.entries.himalaya.enabled true 2>/dev/null || true
+  openclaw config set skills.entries.himalaya.env '{
+    "HIMALAYA_CONFIG": "/agentbox/.config/himalaya/config.toml",
+    "XDG_CONFIG_HOME": "/agentbox/.config"
+  }' 2>/dev/null || true
+  log "Himalaya email skill configured (from=${SMTP_FROM}, relay=smtp2go)"
+else
+  log "SMTP2GO credentials not found or himalaya not installed — email skill skipped"
 fi
 
 # ── 7. Shred decrypted secrets (never leave plaintext on disk) ───────────────

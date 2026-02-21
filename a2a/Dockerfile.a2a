@@ -37,6 +37,14 @@ RUN apt-get update && apt-get install -y \
 # ─── Install pinned OpenClaw ─────────────────────────────────────────────────
 RUN npm install -g openclaw@${OPENCLAW_VERSION} --no-fund
 
+# ─── Install Himalaya email CLI (for SMTP2GO skill) ─────────────────────────
+ARG HIMALAYA_VERSION=1.1.0
+RUN curl -fsSL "https://github.com/pimalaya/himalaya/releases/download/v${HIMALAYA_VERSION}/himalaya.x86_64-linux.tgz" \
+    -o /tmp/himalaya.tgz \
+    && tar -xzf /tmp/himalaya.tgz -C /usr/local/bin/ himalaya \
+    && chmod +x /usr/local/bin/himalaya \
+    && rm /tmp/himalaya.tgz
+
 # ─── Python deps for A2A wrapper ─────────────────────────────────────────────
 COPY a2a/requirements.txt /app/a2a/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/a2a/requirements.txt
@@ -46,17 +54,19 @@ COPY a2a /app/a2a
 
 # ─── Runtime dirs ────────────────────────────────────────────────────────────
 RUN mkdir -p /agentbox/.openclaw/workspace /agentbox/data /agentbox/logs \
+    /agentbox/.config/himalaya \
+    /agentbox/.local/share/himalaya/maildir/{cur,new,tmp,Sent/cur,Sent/new,Sent/tmp} \
     && chown -R agentbox:agentbox /agentbox /app
 
 COPY a2a/supervisord.conf /etc/supervisor/conf.d/agentbox-a2a.conf
 COPY a2a/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /app/a2a/sync-workspace.sh /app/a2a/pair-slack.sh
 
 # ─── Non-root user ───────────────────────────────────────────────────────────
 USER agentbox
 
 # Verify installs
-RUN openclaw --version && gh --version
+RUN openclaw --version && gh --version && himalaya --version
 
 ENV HOME=/agentbox
 ENV NODE_ENV=production
