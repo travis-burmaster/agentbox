@@ -33,7 +33,7 @@ if [ -z "${ENCRYPTION_KEY:-}" ]; then
 fi
 
 openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
-  -pass pass:"${ENCRYPTION_KEY}" \
+  -pass env:ENCRYPTION_KEY \
   -in "${INPUT}" \
   -out "${OUTPUT}"
 

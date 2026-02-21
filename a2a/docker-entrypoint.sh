@@ -74,7 +74,7 @@ fi
 
 log "Decrypting secrets bundle..."
 openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 100000 \
-  -pass pass:"${ENCRYPTION_KEY}" \
+  -pass env:ENCRYPTION_KEY \
   -in "${SECRETS_ENC_PATH}" \
   -out "${SECRETS_JSON}"
 chmod 600 "${SECRETS_JSON}"

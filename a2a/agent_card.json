@@ -10,10 +10,10 @@
     "stateTransitionHistory": false
   },
   "defaultInputModes": [
-    "text"
+    "text/plain"
   ],
   "defaultOutputModes": [
-    "text"
+    "text/plain"
   ],
   "skills": [
     {
