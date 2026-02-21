@@ -4,6 +4,8 @@ substitutions:
   _SERVICE_URL: ""
   _IMAGE_TAG: latest
   _AR_REPO: agentbox
+  _WORKSPACE_REPO: ""
+  _SMTP_FROM: ""
 
 steps:
   - id: create-ar-repo
@@ -48,6 +50,8 @@ steps:
           -e "s|IMAGE_TAG_PLACEHOLDER|${_IMAGE_TAG}|g" \
           -e "s|GEMINI_CALLER_SA_PLACEHOLDER|${_GEMINI_CALLER_SA}|g" \
           -e "s|SERVICE_URL_PLACEHOLDER|${_SERVICE_URL}|g" \
+          -e "s|WORKSPACE_REPO_PLACEHOLDER|${_WORKSPACE_REPO}|g" \
+          -e "s|SMTP_FROM_PLACEHOLDER|${_SMTP_FROM}|g" \
           a2a/cloud_run/service.yaml | \
         gcloud run services replace - \
           --region ${_REGION} \

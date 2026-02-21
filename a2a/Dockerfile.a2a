@@ -1,56 +1,72 @@
 # AgentBox A2A — Self-contained Cloud Run image
 # Bundles OpenClaw gateway + FastAPI A2A wrapper, managed by supervisord.
+# Secrets pulled from encrypted file in private GitHub repo at runtime.
 # Only port 8080 (FastAPI) is exposed; the gateway on :3000 stays internal.
 
 FROM ubuntu:22.04
 
-# ─── OpenClaw version pin (matches main Dockerfile) ─────────────────────────
+# ─── OpenClaw version pin ────────────────────────────────────────────────────
 ARG OPENCLAW_VERSION=2026.2.15
 ENV OPENCLAW_VERSION=${OPENCLAW_VERSION}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Non-root user (same UID as main image)
+# Non-root user
 RUN useradd -m -s /bin/bash -d /agentbox -u 1000 agentbox
 
-# System deps: Node.js 22, Python 3, supervisor
+# ─── System deps: Node.js 22, Python 3, supervisor, gh CLI, jq, openssl ─────
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     git \
+    jq \
+    openssl \
     python3 \
     python3-pip \
     supervisor \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       | tee /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y gh \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install pinned OpenClaw from npm
+# ─── Install pinned OpenClaw ─────────────────────────────────────────────────
 RUN npm install -g openclaw@${OPENCLAW_VERSION} --no-fund
 
-# Python deps for A2A wrapper
+# ─── Install Himalaya email CLI (for SMTP2GO skill) ─────────────────────────
+ARG HIMALAYA_VERSION=1.1.0
+RUN curl -fsSL "https://github.com/pimalaya/himalaya/releases/download/v${HIMALAYA_VERSION}/himalaya.x86_64-linux.tgz" \
+    -o /tmp/himalaya.tgz \
+    && tar -xzf /tmp/himalaya.tgz -C /usr/local/bin/ himalaya \
+    && chmod +x /usr/local/bin/himalaya \
+    && rm /tmp/himalaya.tgz
+
+# ─── Python deps for A2A wrapper ─────────────────────────────────────────────
 COPY a2a/requirements.txt /app/a2a/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/a2a/requirements.txt
 
-# Copy A2A application code
+# ─── A2A application code ────────────────────────────────────────────────────
 COPY a2a /app/a2a
 
-# Dirs and config
+# ─── Runtime dirs ────────────────────────────────────────────────────────────
 RUN mkdir -p /agentbox/.openclaw/workspace /agentbox/data /agentbox/logs \
-    && chown -R agentbox:agentbox /agentbox
-
-COPY config/openclaw.json /agentbox/.openclaw/openclaw.json
-RUN chown agentbox:agentbox /agentbox/.openclaw/openclaw.json
+    /agentbox/.config/himalaya \
+    /agentbox/.local/share/himalaya/maildir/{cur,new,tmp,Sent/cur,Sent/new,Sent/tmp} \
+    && chown -R agentbox:agentbox /agentbox /app
 
 COPY a2a/supervisord.conf /etc/supervisor/conf.d/agentbox-a2a.conf
 COPY a2a/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /app/a2a/sync-workspace.sh /app/a2a/pair-slack.sh
 
-# Switch to non-root user
+# ─── Non-root user ───────────────────────────────────────────────────────────
 USER agentbox
 
-# Verify openclaw is installed
-RUN openclaw --version
+# Verify installs
+RUN openclaw --version && gh --version && himalaya --version
 
 ENV HOME=/agentbox
 ENV NODE_ENV=production
@@ -59,7 +75,7 @@ ENV AGENTBOX_BACKEND=cli
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -sf http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
