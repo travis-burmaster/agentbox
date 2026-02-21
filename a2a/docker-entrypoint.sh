@@ -30,12 +30,18 @@ log "Workspace repo: ${WORKSPACE_REPO}"
 # Configure git for workspace repo push/pull.
 git config --global user.email "${GIT_AUTHOR_EMAIL:-agentbox@noreply.github.com}"
 git config --global user.name "${GIT_AUTHOR_NAME:-AgentBox Cloud Run}"
-git config --global credential.helper "store --file /agentbox/.git-credentials"
-echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > /agentbox/.git-credentials
-chmod 600 /agentbox/.git-credentials
+
+# Use /dev/shm (tmpfs — never touches persistent disk, wiped on exit) for the
+# git askpass helper so GITHUB_TOKEN is never written to a credential file.
+_GIT_ASKPASS=$(mktemp /dev/shm/.git-askpass-XXXXXX)
+printf '#!/bin/sh\nprintf "%%s\\n" "${GITHUB_TOKEN}"\n' > "${_GIT_ASKPASS}"
+chmod 700 "${_GIT_ASKPASS}"
+export GIT_ASKPASS="${_GIT_ASKPASS}"
+export GIT_USERNAME="x-access-token"
+export GIT_TERMINAL_PROMPT=0
 
 # ── 3. Clone or update workspace repo ────────────────────────────────────────
-WORKSPACE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${WORKSPACE_REPO}.git"
+WORKSPACE_URL="https://github.com/${WORKSPACE_REPO}.git"  # token injected via GIT_ASKPASS
 mkdir -p "${WORKSPACE_DIR}"
 
 if [ -d "${WORKSPACE_DIR}/.git" ]; then
@@ -120,6 +126,7 @@ while IFS="=" read -r key value; do
   export "${key}=${value}"
   log "  exported ${key}"
 done < <(jq -r "${ENV_FILTER}"' | to_entries[]
+  | select(.key | startswith("_") | not)
   | select(.key != "encryption_key")
   | select(.value | type == "string")
   | "\(.key | ascii_upcase)=\(.value)"' "${SECRETS_JSON}")
@@ -190,9 +197,13 @@ fi
 
 # ── 6b. Ensure Slack DM access is configured ─────────────────────────────────
 # If SLACK_ALLOW_FROM is set, configure the Slack DM allowlist.
-# Use "*" to allow all users, or comma-separated Slack user IDs.
-SLACK_ALLOW_FROM="${SLACK_ALLOW_FROM:-*}"
-if command -v openclaw &>/dev/null; then
+# Set to comma-separated Slack user IDs (e.g. "U012AB3CD,U098ZY7WX").
+# Defaults to empty — Slack DM access is disabled unless explicitly configured.
+SLACK_ALLOW_FROM="${SLACK_ALLOW_FROM:-}"
+if [ -z "${SLACK_ALLOW_FROM}" ]; then
+  log "SLACK_ALLOW_FROM not set — Slack DM access disabled (set in service.yaml to enable)"
+fi
+if [ -n "${SLACK_ALLOW_FROM}" ] && command -v openclaw &>/dev/null; then
   openclaw config set channels.slack.dm.enabled true 2>/dev/null || true
   openclaw config set channels.slack.dm.policy open 2>/dev/null || true
   # Set allowFrom as a JSON array (top-level channels.slack.allowFrom per newer schema)

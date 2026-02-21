@@ -50,9 +50,19 @@ spec:
               value: SMTP_FROM_PLACEHOLDER
             - name: WORKSPACE_SYNC_INTERVAL
               value: "60"   # seconds between memory sync to GitHub
+            # ── Slack DM access ────────────────────────────────────────
+            # Set to comma-separated Slack user IDs to enable DM access.
+            # Leave empty to disable entirely (default — secure by default).
+            # Example: "U012AB3CD,U098ZY7WX"
+            - name: SLACK_ALLOW_FROM
+              value: ""
+
             # ── One-shot pairing (remove after approved) ───────────────
+            # Set pairing code, deploy once, then CLEAR and redeploy.
+            # Leaving this set is a security risk — any user with the code
+            # can pair a new channel.
             - name: SLACK_PAIRING_CODE
-              value: ""   # set to pairing code, deploy, then clear
+              value: ""   # set to pairing code, deploy, then MUST clear
 
             # ── Secrets (only 2 from Secret Manager) ─────────────────────────
             # All other credentials live in secrets_encrypted.enc inside the
