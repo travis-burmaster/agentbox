@@ -10,7 +10,7 @@ if [ -z "${PAIRING_CODE}" ]; then
 fi
 
 echo "[pair-slack] Waiting for gateway to be ready..."
-for i in $(seq 1 30); do
+for i in $(seq 1 90); do
   if openclaw status &>/dev/null; then
     break
   fi
