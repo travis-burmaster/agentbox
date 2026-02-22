@@ -1,0 +1,24 @@
+# identity_map.yaml — Map Slack user IDs to roles
+#
+# How to find Slack user IDs:
+#   1. In Slack: click a user's name → "View profile" → "More" → "Copy member ID"
+#   2. Via API: GET https://slack.com/api/users.list (requires users:read scope)
+#   3. Via bot: send /whoami in Slack and configure your bot to echo ctx.user_id
+#
+# Roles: admin | operator | readonly
+#
+# "default" is the fallback for any Slack user NOT listed below.
+# Best practice: keep default at "readonly" (fail-safe).
+
+identity_map:
+  # ── Admins ────────────────────────────────────────────────────────────────
+  # Replace with real Slack user IDs from your workspace
+  U_PLACEHOLDER_TRAVIS: admin      # Travis Burmaster
+
+  # ── Operators ────────────────────────────────────────────────────────────
+  U_PLACEHOLDER_ENG1: operator     # Engineering team member 1
+  U_PLACEHOLDER_ENG2: operator     # Engineering team member 2
+
+  # ── Default fallback ─────────────────────────────────────────────────────
+  # Any Slack user not listed above gets this role
+  default: readonly
