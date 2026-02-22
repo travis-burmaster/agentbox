@@ -6,7 +6,7 @@
 FROM ubuntu:22.04
 
 # ─── OpenClaw version pin ────────────────────────────────────────────────────
-ARG OPENCLAW_VERSION=2026.2.15
+ARG OPENCLAW_VERSION=2026.2.19-2
 ENV OPENCLAW_VERSION=${OPENCLAW_VERSION}
 
 ENV DEBIAN_FRONTEND=noninteractive
