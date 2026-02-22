@@ -54,8 +54,11 @@ do_sync() {
       git pull --no-rebase --quiet 2>/dev/null || true
     }
 
-    # Stage memory files and any other workspace changes
+    # Stage memory files and any other workspace changes, but never USER.md
+    # USER.md is a shared identity file — per-user data goes in memory/*
     git add -A 2>/dev/null || true
+    git reset HEAD -- USER.md 2>/dev/null || true
+    git checkout -- USER.md 2>/dev/null || true
 
     # Check if there are staged changes
     if git diff --cached --quiet 2>/dev/null; then
