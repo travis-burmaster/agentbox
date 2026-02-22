@@ -136,6 +136,14 @@ def _extract_caller_email_from_bearer(authz_header: Optional[str]) -> Optional[s
     return str(email) if email else None
 
 
+def _sanitize_email_for_path(email: str) -> str:
+    """Convert email to a filesystem-safe directory name.
+
+    e.g. 'user@domain.com' -> 'user-at-domain-com'
+    """
+    return email.lower().replace("@", "-at-").replace(".", "-")
+
+
 def _validate_google_token(authz_header: Optional[str]) -> Optional[str]:
     if not authz_header or not authz_header.startswith("Bearer "):
         return "Missing or invalid Authorization header"
@@ -337,6 +345,13 @@ async def a2a_root(request: Request):
         if not task_text:
             return _a2a_error(code=-32602, message="No text found in message.parts", rpc_id=rpc.id)
 
+        # Inject caller identity so the agent can resolve per-user memory
+        caller_email = _extract_caller_email_from_bearer(authz_header)
+        if caller_email:
+            caller_id = _sanitize_email_for_path(caller_email)
+            memory_path = f"memory/a2a/{caller_id}/A2A_MEMORY.md"
+            task_text = f"[A2A caller: {caller_email} | user memory: {memory_path}]\n{task_text}"
+
         task_id = str(uuid.uuid4())
         context_id = rpc.params.get("configuration", {}).get("contextId") or task_id
 
@@ -431,6 +446,13 @@ async def a2a_root(request: Request):
         task_text = _extract_text_from_parts(parts)
         task_id = rpc.params.get("id", str(uuid.uuid4()))
         stream = rpc.params.get("stream", False)
+
+        # Inject caller identity so the agent can resolve per-user memory
+        caller_email = _extract_caller_email_from_bearer(authz_header)
+        if caller_email:
+            caller_id = _sanitize_email_for_path(caller_email)
+            memory_path = f"memory/a2a/{caller_id}/A2A_MEMORY.md"
+            task_text = f"[A2A caller: {caller_email} | user memory: {memory_path}]\n{task_text}" if task_text else task_text
 
         if not task_text:
             return _a2a_error(code=-32602, message="User text is required in message.parts", rpc_id=rpc.id)

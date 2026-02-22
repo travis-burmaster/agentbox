@@ -255,6 +255,53 @@ else
   log "SMTP2GO credentials not found or himalaya not installed — email skill skipped"
 fi
 
+# ── 6d. Scaffold per-user memory directories and seed MEMORY.md ──────────────
+mkdir -p "${WORKSPACE_DIR}/memory/slack"
+mkdir -p "${WORKSPACE_DIR}/memory/a2a"
+log "Per-user memory directories scaffolded"
+
+# Append per-user isolation instructions to MEMORY.md (idempotent via sentinel)
+MEMORY_FILE="${WORKSPACE_DIR}/MEMORY.md"
+SENTINEL="<!-- PER_USER_MEMORY_ISOLATION -->"
+
+if [ ! -f "${MEMORY_FILE}" ] || ! grep -qF "${SENTINEL}" "${MEMORY_FILE}"; then
+  cat >> "${MEMORY_FILE}" <<'MEMEOF'
+
+<!-- PER_USER_MEMORY_ISOLATION -->
+## Per-User Memory Isolation
+
+Each user gets their own memory file. **Never** store user-specific notes,
+preferences, or conversation context in this shared MEMORY.md.
+
+### Slack Users
+- The Slack user ID is available from the session/channel context (e.g. `U08GDMP0EBZ`).
+- Store per-user memory at: `memory/slack/{SLACK_USER_ID}/SLACK_MEMORY.md`
+- On first interaction, create the file with header: `# Slack Memory — {SLACK_USER_ID}`
+- Example path: `memory/slack/U08GDMP0EBZ/SLACK_MEMORY.md`
+
+### A2A Callers
+- Inbound A2A messages include a header: `[A2A caller: EMAIL | user memory: PATH]`
+- Parse the header to identify the caller and their memory file path.
+- Store per-user memory at the path specified in the header (e.g. `memory/a2a/user-at-domain-com/A2A_MEMORY.md`).
+- On first interaction, create the file with header: `# A2A Memory — EMAIL`
+
+### Rules
+1. **NEVER modify `USER.md`** with individual user preferences, profile details, or
+   conversation context. `USER.md` is a shared workspace file committed to the repo —
+   it must only contain information that applies to ALL users (e.g. system-owner identity,
+   global communication style). Per-user data goes in the per-user memory files below.
+2. **NEVER modify `MEMORY.md`** with per-user notes. This file is for cross-user
+   knowledge only (e.g. system config, shared procedures, tool documentation).
+3. Read the user's memory file at the start of each conversation if it exists.
+4. Write back any new preferences, facts, or context to their per-user file only.
+5. If you learn something user-specific (name, preferences, timezone, etc.),
+   store it in `memory/slack/{ID}/SLACK_MEMORY.md` or `memory/a2a/{ID}/A2A_MEMORY.md` — never in `USER.md` or `MEMORY.md`.
+MEMEOF
+  log "MEMORY.md seeded with per-user isolation instructions"
+else
+  log "MEMORY.md already has per-user isolation section — skipping"
+fi
+
 # ── 7. Shred decrypted secrets (never leave plaintext on disk) ───────────────
 shred -u "${SECRETS_JSON}" 2>/dev/null || rm -f "${SECRETS_JSON}"
 log "Decrypted secrets file shredded"
