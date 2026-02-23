@@ -129,6 +129,32 @@ done < <(jq -r "${ENV_FILTER}"' | to_entries[]
   | select(.value | type == "string")
   | "\(.key | ascii_upcase)=\(.value)"' "${SECRETS_JSON}")
 
+# ── 5a. Write .openclaw/.env so openclaw skills inherit all secrets ──────
+# supervisord only passes vars listed in its environment= directive;
+# writing a .env file ensures openclaw (and himalaya) can read them all.
+OPENCLAW_ENV_FILE="${OPENCLAW_HOME}/.env"
+log "Writing secrets to ${OPENCLAW_ENV_FILE}..."
+jq -r "${ENV_FILTER}"' | to_entries[]
+  | select(.key | startswith("_") | not)
+  | select(.key != "encryption_key")
+  | select(.value | type == "string")
+  | "\(.key | ascii_upcase)=\(.value)"' "${SECRETS_JSON}" > "${OPENCLAW_ENV_FILE}"
+
+# Append SMTP2GO vars from runtime env (these come from Cloud Run env / service.yaml,
+# not from secrets_encrypted.enc, so the jq extraction above doesn't capture them)
+[ -n "${SMTP2GO_USER:-}" ]  && echo "SMTP2GO_USER=${SMTP2GO_USER}"   >> "${OPENCLAW_ENV_FILE}"
+[ -n "${SMTP2GO_PASS:-}" ]  && echo "SMTP2GO_PASS=${SMTP2GO_PASS}"   >> "${OPENCLAW_ENV_FILE}"
+[ -n "${SMTP_FROM:-}" ]     && echo "SMTP_FROM=${SMTP_FROM}"         >> "${OPENCLAW_ENV_FILE}"
+
+# Also add runtime paths so himalaya and other tools are discoverable
+{
+  echo "XDG_CONFIG_HOME=/agentbox/.config"
+  echo "HIMALAYA_CONFIG=/agentbox/.config/himalaya/config.toml"
+  echo "HOME=/agentbox"
+} >> "${OPENCLAW_ENV_FILE}"
+chmod 600 "${OPENCLAW_ENV_FILE}"
+log "  wrote $(wc -l < "${OPENCLAW_ENV_FILE}") vars to .openclaw/.env"
+
 # ── 5b. Restore openclaw state files (auth providers, models, etc.) ──────
 # The backup stores base64-encoded files under .openclaw_state.files
 # Paths are relative to OPENCLAW_HOME (e.g. agents/<id>/agent/auth.json)
@@ -214,8 +240,12 @@ if [ -n "${SLACK_ALLOW_FROM}" ] && command -v openclaw &>/dev/null; then
 fi
 
 # ── 6c. Configure Himalaya email skill (SMTP2GO) ─────────────────────────────
+# Support both naming conventions: SMTP2GO_USER/SMTP2GO_PASS and SMTP_USER/SMTP_PASSWORD
 SMTP_FROM="${SMTP_FROM:-}"
-if [ -n "${SMTP_FROM}" ] && [ -n "${SMTP2GO_USER:-}" ] && [ -n "${SMTP2GO_PASS:-}" ] && command -v himalaya &>/dev/null; then
+HIMALAYA_SMTP_USER="${SMTP2GO_USER:-${SMTP_USER:-}}"
+HIMALAYA_SMTP_PASS="${SMTP2GO_PASS:-${SMTP_PASSWORD:-}}"
+
+if [ -n "${SMTP_FROM}" ] && [ -n "${HIMALAYA_SMTP_USER}" ] && [ -n "${HIMALAYA_SMTP_PASS}" ] && command -v himalaya &>/dev/null; then
   HIMALAYA_CONFIG_DIR="/agentbox/.config/himalaya"
   mkdir -p "${HIMALAYA_CONFIG_DIR}"
   MAILDIR_ROOT="/agentbox/.local/share/himalaya/maildir"
@@ -237,11 +267,18 @@ message.send.backend.type = "smtp"
 message.send.backend.host = "mail.smtp2go.com"
 message.send.backend.port = 2525
 message.send.backend.encryption.type = "start-tls"
-message.send.backend.login = "${SMTP2GO_USER}"
+message.send.backend.login = "${HIMALAYA_SMTP_USER}"
 message.send.backend.auth.type = "password"
-message.send.backend.auth.cmd = "printenv SMTP2GO_PASS"
+message.send.backend.auth.raw = "${HIMALAYA_SMTP_PASS}"
 TOML
   chmod 600 "${HIMALAYA_CONFIG_DIR}/config.toml"
+
+  # Verify the himalaya account configuration works
+  if himalaya account check default 2>/dev/null; then
+    log "Himalaya account check passed"
+  else
+    log "WARNING: himalaya account check failed (SMTP may still work at send time)"
+  fi
 
   # Enable the himalaya skill in openclaw config
   # HIMALAYA_CONFIG is the env var himalaya CLI actually reads for config path
@@ -250,9 +287,10 @@ TOML
     "HIMALAYA_CONFIG": "/agentbox/.config/himalaya/config.toml",
     "XDG_CONFIG_HOME": "/agentbox/.config"
   }' 2>/dev/null || true
-  log "Himalaya email skill configured (from=${SMTP_FROM}, relay=smtp2go)"
+  log "Himalaya email skill configured (from=${SMTP_FROM}, user=${HIMALAYA_SMTP_USER}, relay=smtp2go)"
 else
-  log "SMTP2GO credentials not found or himalaya not installed — email skill skipped"
+  log "SMTP credentials not found or himalaya not installed — email skill skipped"
+  log "  SMTP_FROM=${SMTP_FROM:-(empty)} SMTP_USER=${HIMALAYA_SMTP_USER:-(empty)} himalaya=$(command -v himalaya 2>/dev/null || echo 'not found')"
 fi
 
 # ── 6d. Scaffold per-user memory directories and seed MEMORY.md ──────────────
@@ -300,6 +338,13 @@ MEMEOF
   log "MEMORY.md seeded with per-user isolation instructions"
 else
   log "MEMORY.md already has per-user isolation section — skipping"
+fi
+
+# ── 6e. Register A2A custom skills directory ─────────────────────────────────
+A2A_SKILLS_DIR="/app/a2a/skills"
+if [ -d "${A2A_SKILLS_DIR}" ]; then
+  openclaw config set skills.load.extraDirs '["'"${A2A_SKILLS_DIR}"'"]' 2>/dev/null || true
+  log "Registered A2A skills directory: ${A2A_SKILLS_DIR}"
 fi
 
 # ── 7. Shred decrypted secrets (never leave plaintext on disk) ───────────────

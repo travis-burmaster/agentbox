@@ -1,9 +1,9 @@
 {
   "protocolVersion": "0.2.0",
   "name": "AgentBox",
-  "description": "AI engineering agent powered by OpenClaw. Executes code, runs analysis, manages workflows, searches the web, and calls APIs on behalf of Gemini Enterprise.",
+  "description": "AI engineering agent powered by OpenClaw. Executes code, runs analysis, manages workflows, searches the web, calls APIs, creates and reads documents (DOCX, XLSX, PDF), and sends email with attachments.",
   "url": "https://agentbox-placeholder.a.run.app",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "capabilities": {
     "streaming": true,
     "pushNotifications": false,
@@ -30,6 +30,82 @@
         "Search the web for the latest news on quantum computing",
         "Write and run a Python script to analyze this CSV data",
         "What files are in the workspace?"
+      ]
+    },
+    {
+      "id": "send_email",
+      "name": "Send Email",
+      "description": "Send email with optional attachments via himalaya (SMTP2GO relay)",
+      "tags": [
+        "email",
+        "communication"
+      ],
+      "examples": [
+        "Send an email to user@example.com with the quarterly report attached",
+        "Email the analysis results to the team"
+      ]
+    },
+    {
+      "id": "create_document",
+      "name": "Create Document",
+      "description": "Create or read Microsoft Word (.docx) documents, convert DOCX to Markdown",
+      "tags": [
+        "docx",
+        "word",
+        "document",
+        "markdown"
+      ],
+      "examples": [
+        "Create a Word document with the project proposal",
+        "Convert this DOCX file to Markdown",
+        "Read the contents of report.docx"
+      ]
+    },
+    {
+      "id": "create_spreadsheet",
+      "name": "Create Spreadsheet",
+      "description": "Create or read Microsoft Excel (.xlsx) spreadsheets with formatting, formulas, and multiple sheets",
+      "tags": [
+        "xlsx",
+        "excel",
+        "spreadsheet",
+        "data"
+      ],
+      "examples": [
+        "Create an Excel spreadsheet with the sales data",
+        "Build a budget spreadsheet with formulas",
+        "Read and summarize the data in report.xlsx"
+      ]
+    },
+    {
+      "id": "read_pdf",
+      "name": "Read PDF",
+      "description": "Extract text, tables, and metadata from PDF files, convert to Markdown",
+      "tags": [
+        "pdf",
+        "extract",
+        "document"
+      ],
+      "examples": [
+        "Extract the text from this PDF",
+        "Summarize the contents of document.pdf",
+        "Pull the tables out of the financial report PDF"
+      ]
+    },
+    {
+      "id": "create_pdf",
+      "name": "Create PDF",
+      "description": "Generate PDF documents with text, tables, images, headers, and footers",
+      "tags": [
+        "pdf",
+        "generate",
+        "document",
+        "report"
+      ],
+      "examples": [
+        "Create a PDF report with the analysis results",
+        "Generate an invoice as a PDF",
+        "Build a PDF summary with tables and charts"
       ]
     }
   ]

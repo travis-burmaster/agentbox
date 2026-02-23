@@ -103,17 +103,53 @@ def _jsonrpc_response(rpc_id: Optional[Union[str, int]], result: Any) -> str:
     )
 
 
-def _extract_text_from_parts(parts: List[Any]) -> str:
-    """Extract text from message parts (handles both typed and untyped)."""
-    chunks = []
+INBOUND_FILE_DIR = Path("/tmp/a2a_inbound")
+
+
+def _save_file_part(file_obj: dict) -> Optional[str]:
+    """Decode a base64 file part and write to /tmp. Returns the file path."""
+    raw_bytes = file_obj.get("bytes")
+    if not raw_bytes:
+        return None
+    try:
+        data = base64.b64decode(raw_bytes)
+    except Exception:  # noqa: BLE001
+        return None
+    name = file_obj.get("name", f"upload_{uuid.uuid4().hex[:8]}")
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in name)[:120]
+    unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    INBOUND_FILE_DIR.mkdir(parents=True, exist_ok=True)
+    dest = INBOUND_FILE_DIR / unique_name
+    dest.write_bytes(data)
+    return str(dest)
+
+
+def _extract_text_from_parts(parts: List[Any]) -> tuple[str, list[str]]:
+    """Extract text and save files from message parts.
+
+    Returns (text, file_descriptions) where file_descriptions are lines like
+    '[file attached: /tmp/a2a_inbound/abc_report.docx (application/pdf)]'
+    """
+    text_chunks: list[str] = []
+    file_lines: list[str] = []
     for p in parts:
-        if isinstance(p, dict):
-            t = p.get("text")
+        part = p if isinstance(p, dict) else (p.__dict__ if hasattr(p, "__dict__") else {})
+        kind = part.get("kind") or part.get("type", "text")
+
+        if kind == "text":
+            t = part.get("text")
             if t:
-                chunks.append(t)
-        elif hasattr(p, "text") and p.text:
-            chunks.append(p.text)
-    return "\n".join(chunks).strip()
+                text_chunks.append(t)
+        elif kind == "file":
+            file_obj = part.get("file", {})
+            saved_path = _save_file_part(file_obj)
+            if saved_path:
+                mime = file_obj.get("mimeType", "unknown")
+                name = file_obj.get("name", "file")
+                file_lines.append(f"[file attached: {saved_path} ({mime}) original_name={name}]")
+
+    text = "\n".join(text_chunks).strip()
+    return text, file_lines
 
 
 def _extract_caller_email_from_bearer(authz_header: Optional[str]) -> Optional[str]:
@@ -341,9 +377,11 @@ async def a2a_root(request: Request):
     if rpc.method in ("message/send", "message/stream"):
         msg_data = rpc.params.get("message", {})
         parts = msg_data.get("parts", [])
-        task_text = _extract_text_from_parts(parts)
-        if not task_text:
-            return _a2a_error(code=-32602, message="No text found in message.parts", rpc_id=rpc.id)
+        task_text, file_descriptions = _extract_text_from_parts(parts)
+        if not task_text and not file_descriptions:
+            return _a2a_error(code=-32602, message="No text or files found in message.parts", rpc_id=rpc.id)
+        if file_descriptions:
+            task_text = task_text + "\n\n" + "\n".join(file_descriptions) if task_text else "\n".join(file_descriptions)
 
         # Inject caller identity so the agent can resolve per-user memory
         caller_email = _extract_caller_email_from_bearer(authz_header)
@@ -443,7 +481,9 @@ async def a2a_root(request: Request):
     if rpc.method == "tasks/send":
         msg_data = rpc.params.get("message", {})
         parts = msg_data.get("parts", [])
-        task_text = _extract_text_from_parts(parts)
+        task_text, file_descriptions = _extract_text_from_parts(parts)
+        if file_descriptions:
+            task_text = task_text + "\n\n" + "\n".join(file_descriptions) if task_text else "\n".join(file_descriptions)
         task_id = rpc.params.get("id", str(uuid.uuid4()))
         stream = rpc.params.get("stream", False)
 
@@ -455,7 +495,7 @@ async def a2a_root(request: Request):
             task_text = f"[A2A caller: {caller_email} | user memory: {memory_path}]\n{task_text}" if task_text else task_text
 
         if not task_text:
-            return _a2a_error(code=-32602, message="User text is required in message.parts", rpc_id=rpc.id)
+            return _a2a_error(code=-32602, message="No text or files found in message.parts", rpc_id=rpc.id)
 
         existing = _tasks.get(task_id)
         if existing is None or existing.done():

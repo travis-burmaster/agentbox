@@ -195,6 +195,15 @@ export async function resolveSlackMedia(params: {
         if (fetched.buffer.byteLength > params.maxBytes) {
           return null;
         }
+        // Detect HTML login/redirect pages returned instead of actual file
+        const expectedMime = file.mimetype ?? "";
+        const fetchedMime = fetched.contentType ?? "";
+        if (
+          fetchedMime.includes("text/html") &&
+          !expectedMime.includes("text/html")
+        ) {
+          return null;
+        }
         const effectiveMime = resolveSlackMediaMimetype(file, fetched.contentType);
         const saved = await saveMediaBuffer(
           fetched.buffer,

@@ -48,6 +48,10 @@ spec:
               value: GEMINI_CALLER_SA_PLACEHOLDER
             - name: SMTP_FROM
               value: SMTP_FROM_PLACEHOLDER
+            - name: SMTP2GO_USER
+              value: SMTP2GO_USER_PLACEHOLDER
+            - name: SMTP2GO_PASS
+              value: SMTP2GO_PASS_PLACEHOLDER
             - name: WORKSPACE_SYNC_INTERVAL
               value: "60"   # seconds between memory sync to GitHub
             # ── Slack DM access ────────────────────────────────────────

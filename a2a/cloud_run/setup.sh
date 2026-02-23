@@ -91,3 +91,8 @@ curl -X POST "https://geminienterprise.googleapis.com/v1/projects/${PROJECT_ID}/
     }
   }'
 EOF
+
+echo ""
+echo "[Optional] Set up off-hours scaling to save costs:"
+echo "  ./a2a/cloud_run/schedule.sh"
+echo "  (Scales to 0 instances weeknights 9pm-5am ET and all weekend)"
