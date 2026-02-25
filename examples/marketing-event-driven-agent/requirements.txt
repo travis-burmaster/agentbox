@@ -1,0 +1,11 @@
+google-cloud-aiplatform>=1.38.0
+vertexai>=1.38.0
+google-cloud-bigquery>=3.13.0
+google-cloud-secret-manager>=2.18.0
+redis[asyncio]>=5.0.0
+confluent-kafka>=2.3.0
+httpx>=0.25.0
+pydantic>=2.5.0
+fastapi>=0.104.0     # For Cloud Run health check endpoint
+uvicorn>=0.24.0
+python-dotenv>=1.0.0
