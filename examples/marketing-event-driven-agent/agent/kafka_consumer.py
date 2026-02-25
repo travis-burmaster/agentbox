@@ -1,8 +1,20 @@
 """
 Kafka Consumer — AgentBox Marketing
 
-Listens to marketing event topics and dispatches to the agent.
-Designed for Cloud Run: starts, processes N events, exits cleanly.
+Listens to marketing event topics and dispatches to the AgentBox core runtime.
+
+Architecture:
+  Kafka event
+    -> marketing-consumer (this service)
+       -> restores state from Redis
+       -> builds context-rich prompt
+       -> POST to AgentBox gateway API (http://agentbox:3000)
+       -> AgentBox runs LLM + tools
+       -> flush updated state back to Redis
+
+The marketing-consumer is a thin routing layer.
+The AgentBox container is the AI brain.
+Redis is the shared memory between both.
 """
 
 import os
@@ -10,6 +22,7 @@ import json
 import asyncio
 import logging
 import signal
+import httpx
 from confluent_kafka import Consumer, KafkaError, KafkaException
 from agent.marketing_agent import MarketingAgent
 from agent.memory import AgentMemory

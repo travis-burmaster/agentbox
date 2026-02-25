@@ -33,40 +33,63 @@ The agent runs a marketing business end-to-end:
          ▼                   ▼                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                  KAFKA (Confluent Cloud / GCP Pub/Sub)               │
-│                                                                      │
-│  marketing.leads        marketing.campaigns    marketing.schedule    │
-│  marketing.commands     marketing.agent.results                      │
+│  marketing.leads   marketing.campaigns   marketing.schedule          │
+│  marketing.commands   marketing.agent.results                        │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │ Consumer Group: agentbox-marketing
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│           CLOUD RUN — AgentBox Container  (min=0, max=10)            │
+│         CONTAINER 1: marketing-consumer  (Cloud Run, min=0)          │
 │                                                                      │
-│   ① COLD START (~300ms)              ② PROCESS EVENT                 │
-│      └─ Load memory from Redis          └─ Parse Kafka message       │
-│      └─ Restore task queue              └─ Invoke Gemini 1.5 Pro    │
-│      └─ Restore campaign states         └─ Execute tools             │
-│      └─ Reconstruct LLM context         └─ Publish to output topic   │
+│  Thin routing layer — no LLM calls, no heavy compute                 │
 │                                                                      │
-│   ③ SHUTDOWN FLUSH (~100ms)                                           │
-│      └─ Write memory → Redis                                         │
-│      └─ Write task updates → Redis                                   │
-│      └─ Write campaign state → Redis                                 │
+│  ① Boot: pull state from Redis (~300ms)                               │
+│     campaign state, lead history, task queue, long-term memory       │
+│                                                                      │
+│  ② Build context-rich prompt from Redis state + Kafka payload        │
+│                                                                      │
+│  ③ POST /message → AgentBox gateway (port 3000)                      │
+│     "New lead: Jane @ Acme. Research and send outreach. Context: ..."│
+│                                                                      │
+│  ④ Flush updated Redis state on shutdown (~100ms)                    │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │ HTTP POST /message
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│         CONTAINER 2: agentbox  (AgentBox Core Runtime)               │
+│                                                                      │
+│  OpenClaw gateway — the actual AI brain                              │
+│                                                                      │
+│  • Receives task from marketing-consumer                             │
+│  • Runs LLM reasoning (Anthropic / Gemini / OpenAI)                  │
+│  • Executes tools: send_email, search_web, update_crm, publish       │
+│  • Reads/writes its own memory to Redis                              │
+│  • Returns result to marketing-consumer                              │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
         ┌──────────────────────┼──────────────────────┐
         ▼                      ▼                       ▼
 ┌──────────────┐   ┌──────────────────┐   ┌─────────────────────────┐
-│ REDIS        │   │ VERTEX AI        │   │ DOWNSTREAM              │
-│ (Memorystore)│   │ Gemini 1.5 Pro   │   │                         │
-│              │   │                  │   │ • Gmail / SMTP          │
-│ long_term    │   │ • LLM inference  │   │ • HubSpot CRM           │
-│ tasks        │   │ • Tool calling   │   │ • LinkedIn API          │
-│ campaigns    │   │ • Grounding      │   │ • BigQuery analytics    │
-│ leads        │   └──────────────────┘   │ • Cloud Storage         │
-│ content      │                          └─────────────────────────┘
+│ REDIS        │   │ LLM PROVIDER     │   │ DOWNSTREAM              │
+│ (Memorystore)│   │                  │   │                         │
+│              │   │ Anthropic Claude │   │ • Gmail / SMTP          │
+│ Shared by    │   │ Vertex Gemini    │   │ • HubSpot CRM           │
+│ both         │   │ OpenAI GPT       │   │ • LinkedIn API          │
+│ containers   │   │ (AgentBox picks) │   │ • BigQuery analytics    │
+│              │   └──────────────────┘   │ • Cloud Storage         │
+│ noeviction   │                          └─────────────────────────┘
 └──────────────┘
 ```
+
+### Two Containers, One Brain
+
+| Container | Role | Scales |
+|-----------|------|--------|
+| `agentbox` | AI runtime — OpenClaw gateway, LLM, tools | Persistent (or Cloud Run min=1) |
+| `marketing-consumer` | Kafka router — event translation, Redis state mgmt | Scale to zero (min=0) |
+
+**Why split them?**
+The AgentBox core is stateful and benefits from staying warm. The marketing consumer is stateless per-event and should scale to zero. Redis is the handshake between them — both read and write to the same keys, so the agent always has full context regardless of which container is handling the current event.
 
 ---
 

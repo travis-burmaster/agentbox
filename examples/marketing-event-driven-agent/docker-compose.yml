@@ -1,39 +1,208 @@
 version: "3.9"
 
-# Local dev stack: Redis + Kafka + AgentBox
-# mirrors production GCP topology
+# AgentBox Marketing — Local Dev Stack
+#
+# Services:
+#   agentbox          — AgentBox core runtime (OpenClaw gateway + agent brain)
+#   marketing-consumer — Kafka consumer that routes events into AgentBox
+#   redis             — Persistent agent memory (Memorystore equivalent)
+#   kafka             — Event bus (Confluent Cloud equivalent)
+#   zookeeper         — Kafka dependency
+#   kafka-ui          — Kafka topic browser (localhost:8090)
+#
+# Usage:
+#   cp .env.example .env && edit .env
+#   docker compose up -d
+#   python scripts/publish_event.py --topic marketing.leads --event lead.created \
+#     --data '{"lead_id":"001","name":"Jane","company":"Acme","email":"jane@acme.com"}'
+#   docker compose logs -f marketing-consumer
 
 services:
 
-  # ── Redis (Memorystore equivalent) ─────────────────────────────────────────
+  # ── AgentBox Core Runtime ───────────────────────────────────────────────────
+  # The AI brain. Runs OpenClaw gateway. All LLM reasoning happens here.
+  # marketing-consumer sends events to this service via its API on port 3000.
+  agentbox:
+    build:
+      context: ../..          # Build from the root agentbox repo
+      args:
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.2.15}
+    image: agentbox:latest
+    container_name: agentbox-core
+    hostname: agentbox
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=256M
+      - /run:noexec,nosuid,nodev,size=64M
+      - /var/run/supervisor:noexec,nosuid,nodev,size=16M
+
+    # Expose gateway internally to this compose network only
+    # marketing-consumer calls http://agentbox:3000
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    networks:
+      - agentbox-marketing-net
+
+    volumes:
+      - agentbox-config:/agentbox/.openclaw
+      - agentbox-data:/agentbox/data
+      - agentbox-logs:/agentbox/logs
+      - openclaw-logs:/tmp/openclaw
+
+    environment:
+      - HOME=/agentbox
+      - NODE_ENV=production
+      - OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - REDIS_URL=redis://redis:6379    # AgentBox reads/writes memory here
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "openclaw-gateway"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    tty: true
+    stdin_open: true
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Marketing Consumer ──────────────────────────────────────────────────────
+  # Kafka consumer sidecar. Listens to marketing.* topics, translates events
+  # into AgentBox API calls (POST to agentbox:3000), reads/writes Redis for
+  # campaign state and lead memory between agent runs.
+  marketing-consumer:
+    build:
+      context: .
+    image: agentbox-marketing:latest
+    container_name: agentbox-marketing-consumer
+    hostname: marketing-consumer
+
+    networks:
+      - agentbox-marketing-net
+
+    environment:
+      # AgentBox gateway — where we POST agent turn requests
+      AGENTBOX_API_URL: http://agentbox:3000
+
+      # Redis — shared memory with AgentBox
+      REDIS_URL: redis://redis:6379
+
+      # Kafka
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_API_KEY: ""        # Not needed for local plaintext
+      KAFKA_API_SECRET: ""
+
+      # GCP / Vertex AI (for direct LLM calls if needed)
+      GCP_PROJECT: ${GCP_PROJECT:-}
+      GCP_LOCATION: ${GCP_LOCATION:-us-central1}
+      LLM_MODEL: ${LLM_MODEL:-gemini-1.5-pro}
+
+      # Email
+      SMTP2GO_PASS: ${SMTP2GO_PASS:-}
+
+      # Integrations
+      HUBSPOT_API_KEY: ${HUBSPOT_API_KEY:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      LINKEDIN_ACCESS_TOKEN: ${LINKEDIN_ACCESS_TOKEN:-}
+      LINKEDIN_ORG_ID: ${LINKEDIN_ORG_ID:-}
+
+      # Consumer tuning
+      MAX_EVENTS_PER_RUN: "5"
+      POLL_TIMEOUT_SECONDS: "10"
+
+    volumes:
+      - ./agent:/app/agent     # Hot reload in dev
+
+    restart: unless-stopped
+
+    depends_on:
+      agentbox:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  # Persistent agent memory. noeviction = memory is never silently dropped.
+  # Shared by AgentBox core and marketing-consumer.
   redis:
     image: redis:7-alpine
+    container_name: agentbox-redis
+    hostname: redis
+
+    networks:
+      - agentbox-marketing-net
+
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+
     volumes:
-      - redis_data:/data
-    command: redis-server --save 60 1 --loglevel warning
+      - redis-data:/data
+
+    command: >
+      redis-server
+      --save 60 1
+      --maxmemory-policy noeviction
+      --loglevel warning
+
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
+      timeout: 3s
       retries: 5
 
-  # ── Zookeeper (Kafka dependency) ────────────────────────────────────────────
+  # ── Zookeeper ───────────────────────────────────────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
+    container_name: agentbox-zookeeper
+    hostname: zookeeper
+
+    networks:
+      - agentbox-marketing-net
+
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
 
-  # ── Kafka ───────────────────────────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      retries: 5
+
+  # ── Kafka ────────────────────────────────────────────────────────────────────
   kafka:
     image: confluentinc/cp-kafka:7.5.0
-    depends_on:
-      - zookeeper
+    container_name: agentbox-kafka
+    hostname: kafka
+
+    networks:
+      - agentbox-marketing-net
+
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
+
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -42,45 +211,46 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
       interval: 10s
       retries: 5
+      start_period: 15s
 
-  # ── Kafka UI (local visibility) ─────────────────────────────────────────────
+  # ── Kafka UI ─────────────────────────────────────────────────────────────────
+  # Browse topics and messages at http://localhost:8090
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    depends_on:
-      - kafka
+    container_name: agentbox-kafka-ui
+    hostname: kafka-ui
+
+    networks:
+      - agentbox-marketing-net
+
     ports:
-      - "8090:8080"
+      - "127.0.0.1:8090:8080"
+
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
 
-  # ── AgentBox Marketing ──────────────────────────────────────────────────────
-  agentbox:
-    build: .
     depends_on:
-      redis:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-    environment:
-      REDIS_URL: redis://redis:6379
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_API_KEY: ""        # Not needed for local plaintext
-      KAFKA_API_SECRET: ""
-      GCP_PROJECT: ${GCP_PROJECT}
-      GCP_LOCATION: us-central1
-      LLM_MODEL: gemini-1.5-pro
-      SMTP2GO_PASS: ${SMTP2GO_PASS}
-      MAX_EVENTS_PER_RUN: "5"
-      POLL_TIMEOUT_SECONDS: "10"
-      LOG_LEVEL: INFO
-    volumes:
-      - ./agent:/app/agent   # Hot reload in dev
-    restart: unless-stopped
+      - kafka
 
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  agentbox-marketing-net:
+    driver: bridge
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
-  redis_data:
+  agentbox-config:
+  agentbox-data:
+  agentbox-logs:
+  openclaw-logs:
+  redis-data:
