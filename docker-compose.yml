@@ -77,6 +77,15 @@ services:
       # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
 
+      # ── Turso memory backend (optional) ──────────────────────────────────
+      # Enables durable memory for ephemeral containers. Without this, memory
+      # resets on every container restart. With Turso, containers spin up and
+      # instantly have full memory (files, chunks, embeddings + context files).
+      # Get your free DB at https://turso.tech
+      # Usage: export TURSO_URL=libsql://... TURSO_TOKEN=... && docker compose up -d
+      # - TURSO_URL=${TURSO_URL:-}
+      # - TURSO_TOKEN=${TURSO_TOKEN:-}
+
     # ── Resource limits ──────────────────────────────────────────────────────
     # Prevents runaway agent from exhausting host resources.
     deploy:

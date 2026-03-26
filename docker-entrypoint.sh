@@ -88,5 +88,39 @@ fi
 echo "🚀 Starting AgentBox..."
 echo ""
 
+# ── Turso Memory Sync (optional durable memory backend) ──────────────────────
+# If TURSO_URL and TURSO_TOKEN are set, pull memory from Turso on startup
+# so ephemeral containers have full memory instantly.
+# See: scripts/turso-memory-sync.sh and scripts/memory-sync-gitagent.sh
+if [ -n "${TURSO_URL:-}" ] && [ -n "${TURSO_TOKEN:-}" ]; then
+    echo "🧠 Pulling memory from Turso..."
+
+    # Initialize schema (idempotent — safe to run every time)
+    bash /agentbox/scripts/turso-memory-sync.sh init || \
+        echo "⚠️  Warning: Turso schema init failed (continuing anyway)"
+
+    # Pull SQLite memory (files, chunks, embedding_cache)
+    bash /agentbox/scripts/turso-memory-sync.sh pull || \
+        echo "⚠️  Warning: Turso SQLite pull failed (continuing anyway)"
+
+    # Pull gitagent flat-file memory (context.md, dailylog.md, key-decisions.md)
+    bash /agentbox/scripts/memory-sync-gitagent.sh pull || \
+        echo "⚠️  Warning: Turso flat-file pull failed (continuing anyway)"
+
+    echo "✅ Memory sync complete"
+    echo ""
+
+    # Register teardown hook — push memory back to Turso before container stops
+    # Uses a trap on SIGTERM/SIGINT so it fires even on docker stop
+    teardown_memory() {
+        echo ""
+        echo "🧠 Teardown: pushing memory to Turso..."
+        bash /agentbox/scripts/turso-memory-sync.sh push || true
+        bash /agentbox/scripts/memory-sync-gitagent.sh push || true
+        echo "✅ Teardown memory sync complete"
+    }
+    trap teardown_memory SIGTERM SIGINT
+fi
+
 # Execute the main command
 exec "$@"

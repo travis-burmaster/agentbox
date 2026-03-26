@@ -633,6 +633,91 @@ docker run --rm agentbox:latest openclaw <command> --help
 
 ---
 
+## 🧠 Durable Memory for Ephemeral Agents
+
+### The Problem
+
+Ephemeral containers lose all memory on restart. By default, AgentBox stores memory in a Docker volume (`agentbox-config`) — but Docker volumes can't follow an agent across machines, Cloud Run instances, or Kubernetes pods.
+
+### The Solution: Turso + gitagent Flat Files
+
+AgentBox integrates [Turso](https://turso.tech) (libSQL cloud) as an optional durable memory backend, inspired by the [gitagent](https://github.com/open-gitagent/gitagent) flat-file memory pattern:
+
+```
+Container starts → pull from Turso (SQLite + flat files) → run → push to Turso → stops
+```
+
+### Quick Setup (3 Steps)
+
+**Step 1: Create a free Turso database**
+```bash
+curl -sSfL https://get.tur.so/install.sh | bash
+turso auth login
+turso db create my-agent-memory
+turso db show --url my-agent-memory   # Copy the URL
+turso db tokens create my-agent-memory  # Copy the token
+```
+
+**Step 2: Set environment variables**
+```bash
+export TURSO_URL="libsql://my-agent-memory-yourname.turso.io"
+export TURSO_TOKEN="eyJhbGciOiJF..."
+```
+
+**Step 3: Start AgentBox**
+```bash
+ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
+```
+
+That's it. Memory now persists across every container restart.
+
+### Memory Hierarchy
+
+| Layer | Contents | Storage |
+|-------|----------|---------|
+| SQLite | File index, semantic chunks, embeddings | Turso cloud DB |
+| `memory/runtime/context.md` | Active tasks and working context | Turso `flat_memory` table |
+| `memory/runtime/dailylog.md` | Rolling activity log | Turso `flat_memory` table |
+| `memory/runtime/key-decisions.md` | Significant decisions | Turso `flat_memory` table |
+| `MEMORY.md` | Curated long-term memory | Git repo |
+
+### Memory Sync Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/turso-memory-sync.sh init` | Create Turso schema (idempotent) |
+| `scripts/turso-memory-sync.sh push` | Export local SQLite → Turso |
+| `scripts/turso-memory-sync.sh pull` | Import Turso → local SQLite |
+| `scripts/memory-sync-gitagent.sh push` | Upload flat files → Turso |
+| `scripts/memory-sync-gitagent.sh pull` | Download flat files ← Turso |
+
+### Workspace Structure (gitagent-inspired)
+
+```
+workspace/
+├── agent.yaml                    # Agent manifest (config/agent.yaml template)
+├── SOUL.md                       # Agent identity and personality
+├── AGENTS.md                     # Framework instructions
+├── memory/
+│   ├── runtime/
+│   │   ├── context.md            # Current working context (synced to Turso)
+│   │   ├── dailylog.md           # Rolling session log (synced to Turso)
+│   │   └── key-decisions.md      # Decisions log (synced to Turso)
+│   └── YYYY-MM-DD.md             # Daily notes
+├── knowledge/                    # Static reference docs
+├── hooks/
+│   ├── bootstrap.md              # What agent reads on startup
+│   └── teardown.md               # What agent does before stopping
+└── config/
+    └── agent.yaml                # Full manifest template
+```
+
+### Example
+
+See [`examples/ephemeral-agent-turso/`](./examples/ephemeral-agent-turso/) for a complete minimal example with its own `docker-compose.yml` and detailed README.
+
+---
+
 ## 📞 Support
 
 - **Documentation:** [docs/](./docs/)

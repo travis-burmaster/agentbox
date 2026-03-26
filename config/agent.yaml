@@ -1,0 +1,66 @@
+# agent.yaml — AgentBox manifest (gitagent-compatible)
+# Place this file in your workspace repo root (alongside SOUL.md, AGENTS.md)
+#
+# Environment variable substitution: ${VAR_NAME} is resolved at runtime
+# Unset vars default to empty string unless a fallback is provided: ${VAR:-default}
+
+name: agentbox-agent
+version: "1.0.0"
+description: "OpenClaw-powered agent running in AgentBox"
+
+# ── Model configuration ─────────────────────────────────────────────────────
+model:
+  primary: anthropic/claude-sonnet-4-6
+  fallback: anthropic/claude-haiku-4-5
+  # thinking: enabled  # Uncomment to enable extended thinking
+
+# ── Memory backend ──────────────────────────────────────────────────────────
+memory:
+  # backend: sqlite | turso | none
+  # - sqlite: local SQLite only (default, uses Docker volume)
+  # - turso:  libSQL cloud (durable across container restarts)
+  # - none:   no persistent memory (pure ephemeral)
+  backend: ${MEMORY_BACKEND:-sqlite}
+
+  # Turso settings (required when backend=turso)
+  turso_url: ${TURSO_URL:-}
+  turso_token: ${TURSO_TOKEN:-}
+
+  # gitagent-style flat files — human-readable memory synced alongside SQLite
+  flat_files:
+    enabled: true
+    paths:
+      - memory/runtime/context.md       # Active working context
+      - memory/runtime/dailylog.md      # Rolling session log
+      - memory/runtime/key-decisions.md # Significant decisions
+
+# ── Workspace ───────────────────────────────────────────────────────────────
+workspace:
+  # Git repo to clone on container startup (A2A / Cloud Run entrypoint)
+  repo: ${WORKSPACE_REPO:-}
+  branch: ${WORKSPACE_BRANCH:-main}
+
+# ── Hooks ───────────────────────────────────────────────────────────────────
+hooks:
+  # Instructions for the agent to follow on container startup (after memory sync)
+  bootstrap: hooks/bootstrap.md
+  # Instructions for the agent to follow before container stops (before memory push)
+  teardown: hooks/teardown.md
+
+# ── Skills ──────────────────────────────────────────────────────────────────
+# List of skill directories to load on startup
+# skills:
+#   - ~/.npm-global/lib/node_modules/openclaw/skills/github
+#   - ~/.openclaw/workspace/skills/custom-skill
+
+# ── Channels ────────────────────────────────────────────────────────────────
+# channels:
+#   telegram:
+#     bot_token: ${TELEGRAM_BOT_TOKEN:-}
+#   slack:
+#     bot_token: ${SLACK_BOT_TOKEN:-}
+
+# ── Resource limits ─────────────────────────────────────────────────────────
+resources:
+  max_tokens_per_turn: 8192
+  max_turns_per_session: 100

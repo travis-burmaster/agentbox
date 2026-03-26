@@ -1,0 +1,68 @@
+# ephemeral-agent-turso — Minimal example: AgentBox + Turso durable memory
+#
+# Prerequisites:
+#   1. Create a free Turso database: https://turso.tech
+#   2. Get your URL and token: turso db show --url <name> && turso db tokens create <name>
+#   3. Export: export TURSO_URL=libsql://... TURSO_TOKEN=eyJ...
+#   4. Run: ANTHROPIC_API_KEY=sk-ant-... docker compose up
+#
+# What persists across container restarts:
+#   - OpenClaw file index, semantic chunks, embedding cache (in Turso)
+#   - memory/runtime/context.md  — active working context
+#   - memory/runtime/dailylog.md — rolling session log
+#   - memory/runtime/key-decisions.md — significant decisions
+
+services:
+  agentbox:
+    image: agentbox:latest     # Build from repo root: docker build -t agentbox:latest .
+    container_name: agentbox-ephemeral
+
+    # Ephemeral — no persistent volume! Memory comes entirely from Turso.
+    # Remove this comment and add a volume below if you want a local fallback.
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=256M
+      - /run:noexec,nosuid,nodev,size=64M
+      - /var/run/supervisor:noexec,nosuid,nodev,size=16M
+      # Memory DB lives in tmpfs — loaded from Turso on startup, pushed on shutdown
+      - /agentbox/.openclaw/memory:size=512M
+
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    environment:
+      - HOME=/agentbox
+      - NODE_ENV=production
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY}
+
+      # ── Turso memory backend ─────────────────────────────────────────────
+      # Required for durable memory in this ephemeral example.
+      - TURSO_URL=${TURSO_URL:?Set TURSO_URL (e.g. libsql://my-agent.turso.io)}
+      - TURSO_TOKEN=${TURSO_TOKEN:?Set TURSO_TOKEN}
+
+      # Optional: workspace git repo (cloned on startup)
+      # - WORKSPACE_REPO=${WORKSPACE_REPO:-}
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "openclaw-gateway"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s   # Slightly longer — allows Turso pull to complete
+
+    tty: true
+    stdin_open: true
