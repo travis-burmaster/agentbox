@@ -12,23 +12,39 @@
       "model": {
         "primary": "ollama/claude-sonnet-4-6"
       },
-      "models": {
-        "ollama/claude-sonnet-4-6": {
-          "provider": "ollama",
-          "baseURL": "http://127.0.0.1:11434"
-        },
-        "ollama/claude-haiku-4-5-20251001": {
-          "provider": "ollama",
-          "baseURL": "http://127.0.0.1:11434"
-        },
-        "ollama/claude-opus-4-6": {
-          "provider": "ollama",
-          "baseURL": "http://127.0.0.1:11434"
-        }
-      },
       "workspace": "/agentbox/.openclaw/workspace",
       "compaction": {
         "mode": "safeguard"
+      }
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "apiKey": "not-needed",
+        "api": "ollama",
+        "models": [
+          {
+            "id": "claude-sonnet-4-6",
+            "name": "Claude Sonnet (LLM Proxy)",
+            "contextWindow": 200000,
+            "maxTokens": 16384
+          },
+          {
+            "id": "claude-haiku-4-5-20251001",
+            "name": "Claude Haiku (LLM Proxy)",
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "claude-opus-4-6",
+            "name": "Claude Opus (LLM Proxy)",
+            "contextWindow": 200000,
+            "maxTokens": 16384
+          }
+        ]
       }
     }
   },
