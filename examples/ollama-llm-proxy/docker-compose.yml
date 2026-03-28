@@ -1,0 +1,81 @@
+# AgentBox + LLM Proxy (Ollama Facade)
+#
+# Quick start:
+#   cp secrets/secrets.env.template secrets/secrets.env
+#   # Add your Claude OAuth token to secrets/secrets.env
+#   docker compose up -d
+
+services:
+  agentbox-llm:
+    build:
+      context: .
+      args:
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.2.15}
+    image: agentbox-llm:latest
+    container_name: agentbox-llm
+    hostname: agentbox-llm
+
+    # ── Security hardening ─────────────────────────────────────────────────
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=256M
+      - /run:noexec,nosuid,nodev,size=64M
+      - /var/run/supervisor:noexec,nosuid,nodev,size=16M
+
+    # ── Ports (localhost only) ─────────────────────────────────────────────
+    ports:
+      - "127.0.0.1:3000:3000"    # OpenClaw gateway
+
+    networks:
+      - agentbox-net
+
+    # ── Volumes ────────────────────────────────────────────────────────────
+    volumes:
+      - agentbox-config:/agentbox/.openclaw
+      - agentbox-data:/agentbox/data
+      - agentbox-logs:/agentbox/logs
+      - openclaw-logs:/tmp/openclaw
+      # Bind-mount secrets (read-only)
+      - ./secrets/secrets.env:/agentbox/secrets/secrets.env:ro
+
+    # ── Environment ────────────────────────────────────────────────────────
+    environment:
+      - HOME=/agentbox
+      - NODE_ENV=production
+      - OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
+
+    # ── Resource limits ────────────────────────────────────────────────────
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -sf http://localhost:8319/ && curl -sf http://localhost:11434/ && pgrep -f openclaw-gateway"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    tty: true
+    stdin_open: true
+
+networks:
+  agentbox-net:
+    driver: bridge
+
+volumes:
+  agentbox-config:
+  agentbox-data:
+  agentbox-logs:
+  openclaw-logs:

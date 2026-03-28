@@ -1,0 +1,38 @@
+{
+  "gateway": {
+    "mode": "local",
+    "port": 3000,
+    "bind": "loopback",
+    "auth": {
+      "mode": "token"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "ollama/claude-sonnet-4-6"
+      },
+      "models": {
+        "ollama/claude-sonnet-4-6": {
+          "provider": "ollama",
+          "baseURL": "http://127.0.0.1:11434"
+        },
+        "ollama/claude-haiku-4-5-20251001": {
+          "provider": "ollama",
+          "baseURL": "http://127.0.0.1:11434"
+        },
+        "ollama/claude-opus-4-6": {
+          "provider": "ollama",
+          "baseURL": "http://127.0.0.1:11434"
+        }
+      },
+      "workspace": "/agentbox/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      }
+    }
+  },
+  "commands": {
+    "restart": true
+  }
+}
