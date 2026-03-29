@@ -36,14 +36,53 @@ else
     echo "[entrypoint] Set CLAUDE_OAUTH_TOKEN in secrets/secrets.env or as an environment variable"
 fi
 
+# Seed openclaw.json on first boot (named volume starts empty; openclaw needs this file to start)
+mkdir -p /agentbox/.openclaw
+if [ ! -f "/agentbox/.openclaw/openclaw.json" ] && [ -f "/agentbox/host-config/openclaw.json" ]; then
+    cp /agentbox/host-config/openclaw.json /agentbox/.openclaw/openclaw.json
+    echo "[entrypoint] Seeded openclaw.json from host-config"
+fi
+
 # Ensure workspace and backups dirs exist (bind-mounts may be empty)
 mkdir -p /agentbox/.openclaw/workspace /agentbox/backups
 
-# Copy seed config into the volume so openclaw can do atomic renames
-if [ -f "/agentbox/config-seed/openclaw.json" ]; then
-    cp /agentbox/config-seed/openclaw.json /agentbox/.openclaw/openclaw.json
-    echo "[entrypoint] Copied openclaw.json into volume"
+# Inject Telegram channel config directly into openclaw.json (no gateway process needed)
+if [ -n "${TELEGRAM_TOKEN:-}" ]; then
+    echo "[entrypoint] Injecting Telegram channel config..."
+    python3 - <<PYEOF
+import json, os, sys
+
+config_path = "/agentbox/.openclaw/openclaw.json"
+token = os.environ["TELEGRAM_TOKEN"]
+
+try:
+    with open(config_path) as f:
+        cfg = json.load(f)
+except Exception as e:
+    print(f"[entrypoint] Could not read openclaw.json: {e}", file=sys.stderr)
+    sys.exit(0)
+
+cfg.setdefault("channels", {})["telegram"] = {
+    "enabled": True,
+    "dmPolicy": "pairing",
+    "botToken": token,
+    "groups": {"*": {"requireMention": True}},
+    "groupPolicy": "allowlist",
+    "streaming": "partial",
+}
+
+with open(config_path, "w") as f:
+    json.dump(cfg, f, indent=2)
+
+print("[entrypoint] Telegram channel configured")
+PYEOF
+else
+    echo "[entrypoint] TELEGRAM_TOKEN not set — Telegram channel skipped"
 fi
+
+# Kill any stray openclaw processes left over from config setup (before supervisord takes over)
+pkill -f openclaw-gateway 2>/dev/null || true
+sleep 1
 
 echo "[entrypoint] Starting supervisord..."
 echo ""

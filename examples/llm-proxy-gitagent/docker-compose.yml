@@ -39,7 +39,7 @@ services:
     volumes:
       - agentbox-config:/agentbox/.openclaw
       - agentbox-data:/agentbox/data
-      - ./config/openclaw.json:/agentbox/config-seed/openclaw.json:ro
+      - ./config:/agentbox/host-config:ro
       - ./config/llm-proxy.yaml:/app/config.yaml:ro
       - ./workspace:/agentbox/.openclaw/workspace
       - ./backups:/agentbox/backups
@@ -54,6 +54,9 @@ services:
       - BACKUP_INTERVAL_HOURS=${BACKUP_INTERVAL_HOURS:-6}
       - BACKUP_KEEP_COUNT=${BACKUP_KEEP_COUNT:-10}
       - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - CLAUDE_REFRESH_TOKEN=${CLAUDE_REFRESH_TOKEN:-}
+      - CLAUDE_OAUTH_EXPIRES_AT=${CLAUDE_OAUTH_EXPIRES_AT:-}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
