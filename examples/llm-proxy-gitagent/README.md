@@ -35,6 +35,30 @@ python3 -c "import json; d=json.load(open('$HOME/.claude/.credentials.json')); p
 
 ## Architecture
 
+```
+                        ┌─────────────────────────────────────────────────────────┐
+                        │                  Docker Container                        │
+                        │                                                          │
+  Browser / TUI  ──────▶│ :3000  openclaw-gateway  (AI agent runtime)             │
+                        │           │                                              │
+                        │           │  Ollama API  (/api/chat)                    │
+                        │           ▼                                              │
+                        │ :11434 ollama-facade     (Ollama-compatible frontend)    │
+                        │           │                                              │
+                        │           │  OpenAI API  (/v1/chat/completions)          │
+                        │           ▼                                              │
+                        │ :8319  claude-proxy      (OAuth → Anthropic)            │
+                        │           │                                              │
+                        │       backup-cron        (every 6h → ./backups/)        │
+                        └───────────┼─────────────────────────────────────────────┘
+                                    │  HTTPS  Bearer token
+                                    ▼
+                         api.anthropic.com/v1/messages
+                         (claude-sonnet / opus / haiku)
+```
+
+**Request flow:** openclaw sends Ollama-format chat → ollama-facade translates to OpenAI format and passes tools through → claude-proxy converts to Anthropic Messages API format, injects OAuth headers, streams the response back up the chain.
+
 Four processes managed by supervisord inside a single container:
 
 | Process | Port | Role |
