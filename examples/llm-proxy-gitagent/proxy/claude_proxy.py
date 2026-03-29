@@ -116,7 +116,7 @@ def get_token() -> str:
 # ── Request builder (matches CLIProxyAPI claude_executor.go headers) ──────────
 def _build_headers(token: str, stream: bool = False) -> dict:
     h = {
-        "x-api-key": token,
+        "Authorization": f"Bearer {token}",
         "anthropic-version": ANTHROPIC_VERSION,
         "anthropic-beta": OAUTH_BETA,
         "Anthropic-Dangerous-Direct-Browser-Access": "true",
@@ -206,10 +206,51 @@ def openai_to_anthropic(body: dict) -> dict:
     system = None
     filtered = []
     for m in messages:
-        if m.get("role") == "system":
+        role = m.get("role")
+        if role == "system":
             system = m.get("content", "")
-        else:
-            filtered.append({"role": m["role"], "content": m.get("content", "")})
+            continue
+        if role == "tool":
+            # OpenAI tool result → Anthropic tool_result block inside a user message
+            tool_result: dict[str, Any] = {
+                "type": "tool_result",
+                "tool_use_id": m.get("tool_call_id", "unknown"),
+                "content": m.get("content", ""),
+            }
+            if filtered and filtered[-1]["role"] == "user" and isinstance(filtered[-1].get("content"), list):
+                filtered[-1]["content"].append(tool_result)
+            else:
+                filtered.append({"role": "user", "content": [tool_result]})
+            continue
+        if role == "assistant" and m.get("tool_calls"):
+            # OpenAI assistant tool_calls → Anthropic tool_use content blocks
+            content: list[dict] = []
+            text = m.get("content") or ""
+            if text:
+                content.append({"type": "text", "text": text})
+            for tc in m.get("tool_calls", []):
+                args = tc.get("function", {}).get("arguments", "{}")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
+                content.append({
+                    "type": "tool_use",
+                    "id": tc.get("id", f"toolu_{len(content)}"),
+                    "name": tc.get("function", {}).get("name", "unknown"),
+                    "input": args,
+                })
+            filtered.append({"role": "assistant", "content": content})
+            continue
+        content = m.get("content", "")
+        # Drop empty assistant messages — they represent failed/empty prior responses.
+        # Keeping them causes _normalize_messages to emit {"type":"text","text":""} which
+        # Anthropic rejects with HTTP 400 "text content blocks must be non-empty".
+        if role == "assistant" and not content:
+            continue
+        filtered.append({"role": role, "content": content})
+
     result: dict[str, Any] = {
         "model": _resolve_model(body.get("model", "claude-sonnet-4-6")),
         "messages": filtered,
@@ -220,6 +261,19 @@ def openai_to_anthropic(body: dict) -> dict:
         result["system"] = system
     if "temperature" in body:
         result["temperature"] = body["temperature"]
+    # Convert OpenAI-format tools → Anthropic tools
+    if body.get("tools"):
+        anthropic_tools = []
+        for t in body["tools"]:
+            if t.get("type") == "function":
+                f = t["function"]
+                anthropic_tools.append({
+                    "name": f.get("name", ""),
+                    "description": f.get("description", ""),
+                    "input_schema": f.get("parameters", {"type": "object", "properties": {}}),
+                })
+        if anthropic_tools:
+            result["tools"] = anthropic_tools
     return result
 
 
@@ -227,20 +281,37 @@ def anthropic_to_openai(body: dict, model: str) -> dict:
     content_blocks = body.get("content", [])
     text = " ".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
     usage = body.get("usage", {})
+    # Convert tool_use blocks → OpenAI tool_calls
+    tool_calls = []
+    for i, b in enumerate(content_blocks):
+        if b.get("type") == "tool_use":
+            tool_calls.append({
+                "id": b.get("id", f"call_{i}"),
+                "type": "function",
+                "function": {
+                    "name": b.get("name", ""),
+                    "arguments": json.dumps(b.get("input", {})),
+                },
+            })
+    finish_reason = "tool_calls" if tool_calls else body.get("stop_reason", "stop")
+    message: dict[str, Any] = {"role": "assistant", "content": text or None}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
     return {
         "id": body.get("id", ""),
         "object": "chat.completion",
         "created": int(time.time()),
         "model": model,
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
-                     "finish_reason": body.get("stop_reason", "stop")}],
+        "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
         "usage": {"prompt_tokens": usage.get("input_tokens", 0),
                   "completion_tokens": usage.get("output_tokens", 0),
                   "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)},
     }
 
 
-def anthropic_stream_to_openai(chunk: bytes, model: str) -> bytes | None:
+def anthropic_stream_to_openai(chunk: bytes, model: str, state: dict | None = None) -> bytes | None:
+    if state is None:
+        state = {}
     line = chunk.decode(errors="ignore").strip()
     if not line.startswith("data:"):
         return None
@@ -252,17 +323,57 @@ def anthropic_stream_to_openai(chunk: bytes, model: str) -> bytes | None:
     except Exception:
         return None
     etype = data.get("type", "")
-    if etype == "content_block_delta":
+    now = int(time.time())
+
+    if etype == "content_block_start":
+        cb = data.get("content_block", {})
+        if cb.get("type") == "tool_use":
+            idx = data.get("index", 0)
+            state.setdefault("tool_calls", {})[idx] = {
+                "id": cb.get("id", ""), "name": cb.get("name", ""), "arguments": "",
+            }
+            out = {"id": "", "object": "chat.completion.chunk", "created": now, "model": model,
+                   "choices": [{"index": 0, "delta": {"tool_calls": [{
+                       "index": idx, "id": cb.get("id", ""), "type": "function",
+                       "function": {"name": cb.get("name", ""), "arguments": ""},
+                   }]}, "finish_reason": None}]}
+            return f"data: {json.dumps(out)}\n\n".encode()
+
+    elif etype == "content_block_delta":
         delta = data.get("delta", {})
+        idx = data.get("index", 0)
         if delta.get("type") == "text_delta":
             text = delta.get("text", "")
-            out = {"id": "", "object": "chat.completion.chunk", "created": int(time.time()),
-                   "model": model, "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]}
+            out = {"id": "", "object": "chat.completion.chunk", "created": now, "model": model,
+                   "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]}
             return f"data: {json.dumps(out)}\n\n".encode()
+        elif delta.get("type") == "input_json_delta":
+            partial = delta.get("partial_json", "")
+            tc = state.get("tool_calls", {}).get(idx)
+            if tc:
+                tc["arguments"] += partial
+            out = {"id": "", "object": "chat.completion.chunk", "created": now, "model": model,
+                   "choices": [{"index": 0, "delta": {
+                       "tool_calls": [{"index": idx, "function": {"arguments": partial}}]
+                   }, "finish_reason": None}]}
+            return f"data: {json.dumps(out)}\n\n".encode()
+
+    elif etype == "message_delta":
+        stop_reason = data.get("delta", {}).get("stop_reason", "end_turn")
+        finish_reason = "tool_calls" if stop_reason == "tool_use" else "stop"
+        state["finish_reason"] = finish_reason
+        out = {"id": "", "object": "chat.completion.chunk", "created": now, "model": model,
+               "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]}
+        return f"data: {json.dumps(out)}\n\n".encode()
+
     elif etype == "message_stop":
-        out = {"id": "", "object": "chat.completion.chunk", "created": int(time.time()),
-               "model": model, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
-        return f"data: {json.dumps(out)}\n\ndata: [DONE]\n\n".encode()
+        if "finish_reason" not in state:
+            # No message_delta was emitted — send stop + DONE together (legacy path)
+            out = {"id": "", "object": "chat.completion.chunk", "created": now, "model": model,
+                   "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+            return f"data: {json.dumps(out)}\n\ndata: [DONE]\n\n".encode()
+        return b"data: [DONE]\n\n"
+
     return None
 
 
@@ -378,8 +489,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
+            state: dict = {}
             for chunk in resp.iter_lines():
-                converted = anthropic_stream_to_openai(chunk + b"\n", model)
+                converted = anthropic_stream_to_openai(chunk + b"\n", model, state)
                 if converted:
                     self.wfile.write(converted)
                     self.wfile.flush()

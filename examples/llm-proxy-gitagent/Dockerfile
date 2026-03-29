@@ -42,7 +42,8 @@ RUN pip3 install --no-cache-dir \
     openai \
     pyyaml \
     httpx \
-    curl-cffi
+    curl-cffi \
+    yfinance
 
 # ── Copy vendored proxy source ─────────────────────────────────────────────────
 COPY proxy/proxy_core.py /app/proxy_core.py

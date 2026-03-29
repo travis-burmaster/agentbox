@@ -309,10 +309,12 @@ async def _call_with_failover(messages: list[dict], model: str, max_tokens: int)
 
 
 async def _call_with_failover_streaming(
-    messages: list[dict], model: str, max_tokens: int
+    messages: list[dict], model: str, max_tokens: int,
+    tools: list[dict] | None = None,
 ) -> AsyncGenerator[dict, None]:
-    """Try proxy slots in order with streaming. Yields {"text": str} dicts.
-    Final error (all slots exhausted) yields {"error": str}.
+    """Try proxy slots in order with streaming. Yields {"text": str} dicts,
+    {"tool_call_deltas": list} dicts when tool calls are in progress,
+    {"finish_reason": str} when the stream ends, and {"error": str} on failure.
     Pre-stream failures failover to next slot transparently.
     """
     if not keys:
@@ -321,41 +323,64 @@ async def _call_with_failover_streaming(
     ordered = get_ordered_keys()
     last_err = ""
 
+    async def _stream_slot(slot: KeySlot) -> AsyncGenerator[dict, None]:
+        t0 = time.time()
+        input_tok = 0
+        output_tok = 0
+        kwargs: dict = {"model": model, "max_tokens": max_tokens, "messages": messages, "stream": True}
+        if tools:
+            kwargs["tools"] = tools
+        stream = await slot.client.chat.completions.create(**kwargs)
+        last_yield = time.time()
+        async for chunk in stream:
+            choice = chunk.choices[0] if chunk.choices else None
+            delta = (choice.delta.content if choice and choice.delta else None) or ""
+            reasoning = getattr(choice.delta, "reasoning_content", "") or "" if (choice and choice.delta) else ""
+            tool_call_deltas = getattr(choice.delta, "tool_calls", None) if (choice and choice.delta) else None
+            finish_reason = choice.finish_reason if choice else None
+
+            if delta:
+                yield {"text": delta}
+                last_yield = time.time()
+            elif reasoning:
+                yield {"text": ""}
+                last_yield = time.time()
+            elif tool_call_deltas:
+                yield {"tool_call_deltas": [
+                    {
+                        "index": tc.index,
+                        "id": getattr(tc, "id", None),
+                        "type": getattr(tc, "type", "function"),
+                        "function": {
+                            "name": getattr(tc.function, "name", None) if tc.function else None,
+                            "arguments": getattr(tc.function, "arguments", None) if tc.function else None,
+                        },
+                    }
+                    for tc in tool_call_deltas
+                ]}
+                last_yield = time.time()
+            elif time.time() - last_yield > 5:
+                yield {"text": ""}
+                last_yield = time.time()
+
+            if finish_reason:
+                yield {"finish_reason": finish_reason}
+
+            if hasattr(chunk, "usage") and chunk.usage:
+                input_tok = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                output_tok = getattr(chunk.usage, "completion_tokens", 0) or 0
+
+        latency = (time.time() - t0) * 1000
+        slot.record_success()
+        _log_call(model, slot.index, input_tok, output_tok, latency, True)
+
     for slot in ordered:
         if not slot.is_available:
             continue
         t0 = time.time()
-        input_tok = 0
-        output_tok = 0
         try:
-            stream = await slot.client.chat.completions.create(
-                model=model, max_tokens=max_tokens, messages=messages, stream=True
-            )
-            last_yield = time.time()
-            async for chunk in stream:
-                choice = chunk.choices[0] if chunk.choices else None
-                delta = (choice.delta.content if choice and choice.delta else None) or ""
-                # Also check for reasoning_content (extended thinking)
-                reasoning = ""
-                if choice and choice.delta:
-                    reasoning = getattr(choice.delta, "reasoning_content", "") or ""
-                if delta:
-                    yield {"text": delta}
-                    last_yield = time.time()
-                elif reasoning:
-                    # During thinking, emit a zero-width keepalive so the connection stays alive
-                    yield {"text": ""}
-                    last_yield = time.time()
-                elif time.time() - last_yield > 5:
-                    # Keepalive: emit empty chunk every 5s during long thinking pauses
-                    yield {"text": ""}
-                    last_yield = time.time()
-                if hasattr(chunk, "usage") and chunk.usage:
-                    input_tok = getattr(chunk.usage, "prompt_tokens", 0) or 0
-                    output_tok = getattr(chunk.usage, "completion_tokens", 0) or 0
-            latency = (time.time() - t0) * 1000
-            slot.record_success()
-            _log_call(model, slot.index, input_tok, output_tok, latency, True)
+            async for item in _stream_slot(slot):
+                yield item
             return
         except openai.RateLimitError as e:
             latency = (time.time() - t0) * 1000
@@ -374,41 +399,15 @@ async def _call_with_failover_streaming(
             last_err = str(e)
 
     # All ordered slots failed — wait for soonest available
-    # Fallback: wait for any available slot (strategy ordering not applied here)
     slot = await wait_for_available_key(timeout=30)
     if slot is None:
         yield {"error": f"All proxies exhausted. Last error: {last_err}"}
         return
 
     t0 = time.time()
-    input_tok = 0
-    output_tok = 0
     try:
-        stream = await slot.client.chat.completions.create(
-            model=model, max_tokens=max_tokens, messages=messages, stream=True
-        )
-        last_yield = time.time()
-        async for chunk in stream:
-            choice = chunk.choices[0] if chunk.choices else None
-            delta = (choice.delta.content if choice and choice.delta else None) or ""
-            reasoning = ""
-            if choice and choice.delta:
-                reasoning = getattr(choice.delta, "reasoning_content", "") or ""
-            if delta:
-                yield {"text": delta}
-                last_yield = time.time()
-            elif reasoning:
-                yield {"text": ""}
-                last_yield = time.time()
-            elif time.time() - last_yield > 5:
-                yield {"text": ""}
-                last_yield = time.time()
-            if hasattr(chunk, "usage") and chunk.usage:
-                input_tok = getattr(chunk.usage, "prompt_tokens", 0) or 0
-                output_tok = getattr(chunk.usage, "completion_tokens", 0) or 0
-        latency = (time.time() - t0) * 1000
-        slot.record_success()
-        _log_call(model, slot.index, input_tok, output_tok, latency, True)
+        async for item in _stream_slot(slot):
+            yield item
     except Exception as e:
         latency = (time.time() - t0) * 1000
         _log_call(model, slot.index, 0, 0, latency, False, str(e))
