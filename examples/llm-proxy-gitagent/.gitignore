@@ -1,0 +1,8 @@
+# Secrets — never commit
+secrets/secrets.env
+
+# Backup zips
+backups/*.zip
+
+# vendor.sh — maintainer use only, not for public
+vendor.sh

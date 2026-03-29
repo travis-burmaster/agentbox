@@ -1,0 +1,13 @@
+# Starter gitagent spec — replace by running:
+#   ./export-agent.sh https://github.com/your-org/your-agent
+
+name: starter-agent
+description: Helpful AI assistant
+version: "1.0.0"
+
+workspace:
+  soul: SOUL.md
+  agents: AGENTS.md
+
+model:
+  primary: claude-sonnet-4-6

@@ -1,0 +1,88 @@
+# AgentBox + LLM Proxy + GitAgent
+#
+# Quick start:
+#   1. cp secrets/secrets.env.template secrets/secrets.env
+#   2. Edit secrets/secrets.env: set CLAUDE_OAUTH_TOKEN
+#   3. Optional: ./export-agent.sh https://github.com/your-org/your-agent
+#   4. docker compose up -d
+#
+# Agent live at http://localhost:3000
+
+services:
+  agentbox-llm:
+    build:
+      context: .   # self-contained — proxy files vendored in proxy/
+      args:
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.24}
+    image: agentbox-llm-gitagent:latest
+    container_name: agentbox-llm
+    hostname: agentbox-llm
+
+    user: "1000:1000"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=256M
+      - /run:noexec,nosuid,nodev,size=64M
+      - /var/run/supervisor:noexec,nosuid,nodev,size=16M
+
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:11434:11434"
+
+    networks:
+      - agentbox-net
+
+    volumes:
+      - agentbox-config:/agentbox/.openclaw
+      - agentbox-data:/agentbox/data
+      - ./config/openclaw.json:/agentbox/.openclaw/openclaw.json:ro
+      - ./config/llm-proxy.yaml:/app/config.yaml:ro
+      - ./workspace:/agentbox/.openclaw/workspace
+      - ./backups:/agentbox/backups
+      - ./secrets:/agentbox/secrets:ro
+
+    environment:
+      - HOME=/agentbox
+      - NODE_ENV=production
+      - OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
+      - OLLAMA_API_KEY=ollama-local
+      - LLM_PROXY_DB_PATH=/tmp/llm_proxy.db
+      - BACKUP_INTERVAL_HOURS=${BACKUP_INTERVAL_HOURS:-6}
+      - BACKUP_KEEP_COUNT=${BACKUP_KEEP_COUNT:-10}
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "sh", "-c", "pgrep -f openclaw-gateway && curl -sf http://localhost:11434/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    tty: true
+    stdin_open: true
+
+networks:
+  agentbox-net:
+    driver: bridge
+
+volumes:
+  agentbox-config:
+  agentbox-data:

@@ -1,0 +1,11 @@
+# LLM Proxy config — routes ollama-facade → claude_proxy.py → Anthropic API
+primary_url: "http://127.0.0.1:8319/v1"
+secondary_url: ""
+strategy: "priority"
+default_model: "claude-sonnet-4-6"
+default_max_tokens: 8192
+ollama_port: 11434
+ollama_models:
+  - name: "claude-sonnet-4-6"
+  - name: "claude-haiku-4-5-20251001"
+  - name: "claude-opus-4-6"
