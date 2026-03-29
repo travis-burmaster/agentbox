@@ -17,6 +17,9 @@ from google.oauth2 import id_token
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+# Slack authorization layer
+from a2a.skill.middleware import get_skill_router
+
 
 A2A_JSONRPC = "2.0"
 TASK_TIMEOUT_SECONDS = 55 * 60  # 55 min for Cloud Run max window
@@ -495,3 +498,78 @@ async def a2a_root(request: Request):
             return _a2a_error(code=-32001, message=f"Task execution failed: {exc}", rpc_id=rpc.id)
 
     return _a2a_error(code=-32601, message=f"Method not found: {rpc.method}", rpc_id=rpc.id)
+
+
+# ── Slack Authorization Layer ─────────────────────────────────────────────────
+
+
+@app.post("/slack/action")
+async def slack_action_endpoint(request: Request) -> JSONResponse:
+    """
+    Slack → Policy Engine → OpenClaw action endpoint.
+
+    Accepts a structured action request from a Slack bot/integration,
+    runs it through the full authorization pipeline (identity resolution,
+    rate limiting, policy check, parameter sanitization), and forwards
+    approved requests to the OpenClaw runtime.
+
+    Request body:
+        {
+            "slack_user_id": "U01ABC123",   # Slack member ID of the requesting user
+            "action": "search_web",         # Action name (must be in roles.yaml)
+            "params": {"query": "..."}      # Action parameters (will be sanitized)
+        }
+
+    Response:
+        {
+            "allowed": true,
+            "response": "...",              # OpenClaw response text (if allowed)
+            "role": "operator",             # Resolved role of the Slack user
+            "reason": "..."                 # Human-readable allow/deny reason
+        }
+
+    HTTP status codes:
+        200 — Request processed (check "allowed" field for authz result)
+        400 — Malformed request body
+        500 — Internal error (identity/policy/OpenClaw failure)
+    """
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid JSON body"},
+        )
+
+    slack_user_id: str = body.get("slack_user_id", "")
+    action: str = body.get("action", "")
+    params: dict = body.get("params", {})
+
+    if not action:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "'action' field is required"},
+        )
+
+    try:
+        router = get_skill_router()
+        result = await router.dispatch(
+            slack_user_id=slack_user_id,
+            action=action,
+            params=params,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("slack_action_endpoint error: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Internal error: {exc}"},
+        )
+
+    return JSONResponse(
+        content={
+            "allowed": result.allowed,
+            "response": result.response,
+            "role": result.role,
+            "reason": result.reason,
+        }
+    )

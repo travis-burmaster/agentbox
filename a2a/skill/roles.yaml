@@ -1,0 +1,58 @@
+# roles.yaml — Role definitions for the Slack authorization layer
+#
+# Each role defines:
+#   allowed_actions: list of action names this role may invoke ("*" = all)
+#   denied_actions:  explicit denials that override allowed_actions
+#   parameter_constraints: per-action limits applied before forwarding to OpenClaw
+#   rate_limit: max requests per minute for this role
+
+roles:
+  # ── admin ────────────────────────────────────────────────────────────────
+  # Full access. No parameter constraints. High rate limit.
+  # Assign only to trusted engineers / owners.
+  admin:
+    allowed_actions: ["*"]
+    denied_actions: []
+    parameter_constraints: {}
+    rate_limit: 100  # requests / minute
+
+  # ── operator ─────────────────────────────────────────────────────────────
+  # Can run analyses, search, read/write files, execute code with guardrails.
+  # Cannot shell out arbitrarily or delete workspace data.
+  operator:
+    allowed_actions:
+      - run_analysis
+      - search_web
+      - read_file
+      - write_file
+      - run_code
+      - get_status
+      - send_message
+      - fetch_url
+    denied_actions:
+      - exec_shell
+      - delete_workspace
+      - admin_config
+    parameter_constraints:
+      run_code:
+        max_timeout_seconds: 30   # clamp code execution time
+        allowed_languages: ["python", "javascript", "bash"]
+      write_file:
+        max_size_bytes: 1048576   # 1 MB max
+      fetch_url:
+        blocked_patterns: ["localhost", "127.0.0.1", "169.254"]  # no SSRF
+    rate_limit: 30  # requests / minute
+
+  # ── readonly ─────────────────────────────────────────────────────────────
+  # Read-only access. Default for any unmapped Slack user.
+  # Can search the web, read files, check agent status.
+  readonly:
+    allowed_actions:
+      - search_web
+      - read_file
+      - get_status
+    denied_actions: []
+    parameter_constraints:
+      read_file:
+        blocked_paths: ["/etc", "/root", "/home", ".env", "secrets"]
+    rate_limit: 10  # requests / minute
