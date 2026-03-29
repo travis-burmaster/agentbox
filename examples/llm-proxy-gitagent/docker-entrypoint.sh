@@ -39,6 +39,12 @@ fi
 # Ensure workspace and backups dirs exist (bind-mounts may be empty)
 mkdir -p /agentbox/.openclaw/workspace /agentbox/backups
 
+# Copy seed config into the volume so openclaw can do atomic renames
+if [ -f "/agentbox/config-seed/openclaw.json" ]; then
+    cp /agentbox/config-seed/openclaw.json /agentbox/.openclaw/openclaw.json
+    echo "[entrypoint] Copied openclaw.json into volume"
+fi
+
 echo "[entrypoint] Starting supervisord..."
 echo ""
 exec "$@"

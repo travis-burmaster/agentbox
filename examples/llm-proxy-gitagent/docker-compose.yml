@@ -39,7 +39,7 @@ services:
     volumes:
       - agentbox-config:/agentbox/.openclaw
       - agentbox-data:/agentbox/data
-      - ./config/openclaw.json:/agentbox/.openclaw/openclaw.json:ro
+      - ./config/openclaw.json:/agentbox/config-seed/openclaw.json:ro
       - ./config/llm-proxy.yaml:/app/config.yaml:ro
       - ./workspace:/agentbox/.openclaw/workspace
       - ./backups:/agentbox/backups

@@ -2,7 +2,7 @@
   "gateway": {
     "mode": "local",
     "port": 3000,
-    "bind": "0.0.0.0",
+    "bind": "lan",
     "auth": {
       "mode": "token"
     }
@@ -15,9 +15,9 @@
         "apiKey": "ollama-local",
         "api": "ollama",
         "models": [
-          {"name": "claude-sonnet-4-6"},
-          {"name": "claude-haiku-4-5-20251001"},
-          {"name": "claude-opus-4-6"}
+          {"id": "claude-sonnet-4-6", "name": "claude-sonnet-4-6"},
+          {"id": "claude-haiku-4-5-20251001", "name": "claude-haiku-4-5-20251001"},
+          {"id": "claude-opus-4-6", "name": "claude-opus-4-6"}
         ]
       }
     }
