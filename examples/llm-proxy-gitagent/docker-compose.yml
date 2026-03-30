@@ -11,11 +11,11 @@
 services:
   agentbox-llm:
     build:
-      context: .   # self-contained — proxy files vendored in proxy/
+      context: . # self-contained — proxy files vendored in proxy/
       args:
         OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.24}
     image: agentbox-llm-gitagent:latest
-    container_name: agentbox-llm
+    container_name: agentbox-llm-gitagent
     hostname: agentbox-llm
 
     user: "1000:1000"
@@ -57,6 +57,7 @@ services:
       - CLAUDE_REFRESH_TOKEN=${CLAUDE_REFRESH_TOKEN:-}
       - CLAUDE_OAUTH_EXPIRES_AT=${CLAUDE_OAUTH_EXPIRES_AT:-}
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -73,7 +74,7 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD", "sh", "-c", "pgrep -f openclaw-gateway && curl -sf http://localhost:11434/"]
+      test: [ "CMD", "sh", "-c", "pgrep -f openclaw-gateway && curl -sf http://localhost:11434/" ]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -1,39 +1,29 @@
 spec_version: "0.1.0"
-name: quant-sim
+name: claude-law-firm
 version: 1.0.0
 description: >
-  Institutional-grade prediction market simulation engine. Monte Carlo,
-  importance sampling, particle filters, copula dependency modeling, and
-  agent-based market microstructure — every model, every formula, runnable code.
-author: lyzr
-license: MIT
+  A Claude-native legal AI agent for boutique and solo law firms. Handles contract review
+  with severity ratings, tracked-changes editing at the Word XML level, contract drafting,
+  client communications, legal research with anti-hallucination verification, and policy writing.
+  Built to give small firms the throughput of a much larger practice.
 
 model:
-  preferred: claude-opus-4-6
+  preferred: claude-sonnet-4-5-20250929
   fallback:
-    - claude-sonnet-4-5-20250929
-    - claude-haiku-4-5-20251001
+    - claude-opus-4-5-20250514
   constraints:
-    temperature: 0.1
+    temperature: 0.2
     max_tokens: 16384
+    top_p: 0.9
 
 skills:
-  - monte-carlo
-  - variance-reduction
-  - particle-filter
-  - copula-modeling
-  - agent-based-sim
+  - contract-review
+  - tracked-changes
+  - contract-drafting
+  - client-communications
+  - legal-research
+  - policy-writing
 
 runtime:
-  max_turns: 50
-  timeout: 600
-
-tags:
-  - quantitative-finance
-  - monte-carlo
-  - prediction-markets
-  - simulation
-  - risk-management
-  - copulas
-  - particle-filters
-  - agent-based-modeling
+  max_turns: 40
+  timeout: 300

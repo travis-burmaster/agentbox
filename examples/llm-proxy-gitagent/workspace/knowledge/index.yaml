@@ -1,5 +1,5 @@
 documents:
-  - path: references.md
-    always_load: false
-  - path: formulas.md
+  - path: privilege-framework.md
     always_load: true
+  - path: engagement-letter-ai-provision.md
+    always_load: false

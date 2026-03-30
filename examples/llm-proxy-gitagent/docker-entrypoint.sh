@@ -36,6 +36,14 @@ else
     echo "[entrypoint] Set CLAUDE_OAUTH_TOKEN in secrets/secrets.env or as an environment variable"
 fi
 
+# Ensure gateway auth token is set (openclaw requires it when auth.mode=token)
+if [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
+    export OPENCLAW_GATEWAY_TOKEN="$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)"
+    echo "[entrypoint] Generated random OPENCLAW_GATEWAY_TOKEN"
+else
+    echo "[entrypoint] Using provided OPENCLAW_GATEWAY_TOKEN"
+fi
+
 # Seed openclaw.json on first boot (named volume starts empty; openclaw needs this file to start)
 mkdir -p /agentbox/.openclaw
 if [ ! -f "/agentbox/.openclaw/openclaw.json" ] && [ -f "/agentbox/host-config/openclaw.json" ]; then
