@@ -8,43 +8,43 @@ Everything runs on your machine. No Anthropic OAuth, no Claude proxy, no cloud L
 
 - `openclaw-gateway` running in a hardened container on `:3000`
 - Talks to **host Ollama** at `host.docker.internal:11434`
-- Default model: `qwen2.5-32k:7b` (a 32K-context variant of qwen2.5:7b — see [Why not gemma4?](#why-not-gemma4) below)
+- Default model: `qwen3-32k:14b` (a 32K-context variant of qwen3:14b — see [Why not gemma4?](#why-not-gemma4) below)
 - Web search powered by openclaw's native `web_search` tool with the **DuckDuckGo** provider (zero-config, no API key)
 - `web_fetch` tool for retrieving and reading specific URLs
 
-## Verified end-to-end
+## Verified end-to-end (qwen3:14b on a 24 GB M4 Mac)
 
 ```text
 $ docker exec agentbox-ollama openclaw agent --agent main --session-id demo \
     --message "Use the web_search tool to find the current Node.js LTS version. \
                Reply with: the version number, the source URL, and a one-sentence summary."
 
-The current Node.js LTS version is **24.11.0**.
-
-You can find more details about this release on the official
-[Node.js website](https://nodejs.org/en/blog/release/v24.11.0), which states
-that it was released with the codename 'Krypton' and will continue to receive
-updates through April 2028.
-
-This information is sourced from a trusted web search result provided by DuckDuckGo.
+The current Node.js LTS version is **24.11.0** ("Krypton"), supported until April 2028.
+Source URL: https://nodejs.org/en/blog/release/v24.11.0
+Summary: This LTS release includes security updates, performance improvements,
+and long-term support through 2028.
 ```
+
+Also verified earlier with `qwen2.5:7b` on the same hardware — both work end-to-end. qwen3:14b gives noticeably more concise / better-formatted answers.
 
 ## Prerequisites
 
 1. **Docker** + **Docker Compose** (v2)
 2. **Ollama running on the host**. Default model used by this example:
    ```bash
-   ollama pull qwen2.5:7b
+   ollama pull qwen3:14b
    ollama serve            # or rely on the Ollama desktop app
    ```
 3. **A 32K-context Modelfile variant.** Ollama defaults to `num_ctx=8192` regardless of what openclaw asks for, and openclaw refuses any model below 16K context. Create a 32K variant with:
    ```bash
-   cat > Qwen-32k.Modelfile <<'EOF'
-   FROM qwen2.5:7b
+   cat > Qwen3-32k.Modelfile <<'EOF'
+   FROM qwen3:14b
    PARAMETER num_ctx 32768
    EOF
-   ollama create qwen2.5-32k:7b -f Qwen-32k.Modelfile
+   ollama create qwen3-32k:14b -f Qwen3-32k.Modelfile
    ```
+
+   On a 24 GB Apple Silicon Mac (M1/M2/M3/M4), `qwen3:14b` is the largest **dense** qwen3 model that fits comfortably alongside Docker and macOS — about 12 GB resident at 32 K context. The 30B-A3B MoE variant is technically smaller in active params but its 19 GB on-disk weight pushes total memory pressure past 24 GB.
    (This bakes a higher num_ctx into the model definition. The underlying weights are unchanged — Ollama just loads them with a bigger KV cache.)
 4. **The base `agentbox:latest` Docker image.** Build it once from the repo root:
    ```bash
@@ -67,7 +67,7 @@ docker compose up -d
 
 # 3. confirm the model is registered
 docker exec agentbox-ollama openclaw models list
-# → ollama/qwen2.5-32k:7b   text   32k   no   yes   default
+# → ollama/qwen3-32k:14b   text   32k   no   yes   default
 
 # 4. talk to the agent (use a unique --session-id, see Gotchas below)
 docker exec -it agentbox-ollama openclaw agent --agent main --session-id demo1 \
@@ -82,7 +82,7 @@ You can also open the gateway UI at <http://localhost:3000>.
 ┌──────────── host (your Mac/Linux) ───────────┐
 │                                               │
 │   ollama (local)  ─── :11434 ───┐             │
-│   model: qwen2.5-32k:7b          │             │
+│   model: qwen3-32k:14b          │             │
 │                                  │             │
 │   ┌──── docker container ────────┼─┐          │
 │   │                              │ │          │
@@ -202,7 +202,7 @@ On Linux this only works because of `extra_hosts: host.docker.internal:host-gate
 You're using a model variant that loads with default `num_ctx=8192`. Build a 32K variant via `ollama create … -f Modelfile` (see Prerequisites step 3) and reference its tag in `config/openclaw.json`.
 
 **Model never calls the tool, hallucinates an API key error**
-You're probably on a small/weak model (gemma4, llama3.2:1b, qwen2.5:1.5b). Switch to qwen2.5:7b or larger, or llama3.1:8b. Verify by asking the agent `"List the tools available to you"` in a fresh `--session-id` — it should mention `web_search` and `web_fetch`.
+You're probably on a small/weak model (gemma4, llama3.2:1b, qwen2.5:1.5b). Switch to qwen3:14b or larger, or llama3.1:8b. Verify by asking the agent `"List the tools available to you"` in a fresh `--session-id` — it should mention `web_search` and `web_fetch`.
 
 **"This operation was aborted"**
 Agent timeout. Either the model is too slow on your hardware or the prompt is too large. Bump `--timeout 600` and check `docker exec agentbox-ollama openclaw logs --plain --limit 50` for the underlying cause.

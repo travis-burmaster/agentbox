@@ -16,8 +16,8 @@
         "api": "ollama",
         "models": [
           {
-            "id": "qwen2.5-32k:7b",
-            "name": "Qwen 2.5 7B 32k (local)",
+            "id": "qwen3-32k:14b",
+            "name": "Qwen 3 14B 32k (local)",
             "contextWindow": 32768,
             "maxTokens": 4096
           }
@@ -28,7 +28,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "ollama/qwen2.5-32k:7b"
+        "primary": "ollama/qwen3-32k:14b"
       },
       "workspace": "/agentbox/.openclaw/workspace",
       "compaction": {
