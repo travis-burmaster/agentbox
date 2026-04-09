@@ -1,0 +1,4 @@
+secrets/secrets.env
+workspace/*
+!workspace/.gitkeep
+.env

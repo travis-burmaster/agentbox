@@ -1,0 +1,96 @@
+# AgentBox + Local Ollama (gemma4) + Web Search
+#
+# Quick start:
+#   1. Make sure ollama is running on the host with gemma4 pulled:
+#        ollama pull gemma4:latest
+#   2. Make sure the agentbox base image is built:
+#        (from repo root) docker build -t agentbox:latest .
+#   3. cp secrets/secrets.env.template secrets/secrets.env  (optional)
+#   4. docker compose up -d
+#
+# Agent gateway live at http://localhost:3000
+
+services:
+  agentbox-ollama:
+    image: agentbox:latest
+    container_name: agentbox-ollama
+    hostname: agentbox-ollama
+
+    user: "1000:1000"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=256M
+      - /run:noexec,nosuid,nodev,size=64M
+
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    networks:
+      - agentbox-net
+
+    # Reach the host's local Ollama at host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - agentbox-config:/agentbox/.openclaw
+      - agentbox-data:/agentbox/data
+      # Mount host config DIR (not the file) — openclaw atomically rewrites
+      # openclaw.json on save, which fails for single-file bind mounts.
+      # The entrypoint override below copies it into place on each boot.
+      - ./config:/agentbox/host-config:ro
+      - ./workspace:/agentbox/.openclaw/workspace
+      - ./secrets:/agentbox/secrets:ro
+
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "cp /agentbox/host-config/openclaw.json /agentbox/.openclaw/openclaw.json && exec /usr/local/bin/docker-entrypoint.sh supervisord -c /etc/supervisor/conf.d/agentbox.conf"
+
+    environment:
+      - HOME=/agentbox
+      - NODE_ENV=production
+      - OPENCLAW_CONFIG_PATH=/agentbox/.openclaw/openclaw.json
+      # Default Ollama url — overridable via .env
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # Optional gateway auth token (leave empty for local-only use)
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
+      # Optional web-search provider keys — only needed if you switch off duckduckgo
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - EXA_API_KEY=${EXA_API_KEY:-}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
+      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-}
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "sh", "-c", "pgrep -f openclaw-gateway && curl -sf http://localhost:3000/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    tty: true
+    stdin_open: true
+
+networks:
+  agentbox-net:
+    driver: bridge
+
+volumes:
+  agentbox-config:
+  agentbox-data:
