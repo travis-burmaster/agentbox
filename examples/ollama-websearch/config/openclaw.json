@@ -1,0 +1,57 @@
+{
+  "gateway": {
+    "mode": "local",
+    "port": 3000,
+    "bind": "lan",
+    "auth": {
+      "mode": "token"
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://host.docker.internal:11434",
+        "apiKey": "ollama-local",
+        "api": "ollama",
+        "models": [
+          {
+            "id": "qwen2.5-32k:7b",
+            "name": "Qwen 2.5 7B 32k (local)",
+            "contextWindow": 32768,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "ollama/qwen2.5-32k:7b"
+      },
+      "workspace": "/agentbox/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      }
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "duckduckgo",
+        "maxResults": 5,
+        "timeoutSeconds": 30,
+        "cacheTtlMinutes": 15
+      },
+      "fetch": {
+        "enabled": true,
+        "timeoutSeconds": 30
+      }
+    }
+  },
+  "commands": {
+    "restart": true
+  }
+}
