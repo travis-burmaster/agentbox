@@ -1,0 +1,59 @@
+{
+  "gateway": {
+    "mode": "local",
+    "port": 3000,
+    "bind": "lan",
+    "auth": {
+      "mode": "token"
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "qwen-mlx": {
+        "baseUrl": "http://host.docker.internal:8012/v1",
+        "apiKey": "mlx-local",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "qwen3.6-35b",
+            "name": "Qwen 3.6 35B-A3B (MLX 4-bit, local)",
+            "contextWindow": 65536,
+            "maxTokens": 4096,
+            "input": ["text"],
+            "reasoning": false
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "qwen-mlx/qwen3.6-35b"
+      },
+      "workspace": "/agentbox/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      }
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "duckduckgo",
+        "maxResults": 5,
+        "timeoutSeconds": 30,
+        "cacheTtlMinutes": 15
+      },
+      "fetch": {
+        "enabled": true,
+        "timeoutSeconds": 30
+      }
+    }
+  },
+  "commands": {
+    "restart": true
+  }
+}
