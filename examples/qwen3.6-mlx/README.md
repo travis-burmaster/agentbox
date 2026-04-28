@@ -9,7 +9,7 @@ Talks to a host-side **`mlx_lm.server`** over the OpenAI-compatible API (`/v1/ch
 - 100% local inference on Apple Silicon — no Anthropic OAuth, no cloud LLM bills.
 - Qwen3.6-35B-A3B is an MoE model: ~35B total params but only ~3B activated per token, so generation is fast (~99 tok/s on M-series with 48 GB unified memory).
 - Native context window is 256K; this example advertises 64K to keep KV-cache RAM bounded.
-- The image extends `agentbox:latest` with the **GitHub CLI (`gh`)** so the agent can clone, read, and open PRs against your repos without leaving the container.
+- The image extends `agentbox:latest` with the **GitHub CLI (`gh`)**, **`vim`**, and **`nano`** so the agent (and you, via `docker exec`) can clone, read, edit, and open PRs against your repos without leaving the container.
 
 ## Architecture
 

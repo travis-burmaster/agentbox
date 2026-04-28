@@ -1,4 +1,5 @@
-# Extends agentbox:latest with the GitHub CLI (gh) for repo work from the agent.
+# Extends agentbox:latest with the GitHub CLI (gh) plus vim and nano editors
+# for in-container file edits.
 #
 # Build:
 #   (from repo root, one-time) docker build -t agentbox:latest .
@@ -21,7 +22,7 @@ RUN apt-get update \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends gh \
+ && apt-get install -y --no-install-recommends gh vim nano \
  && apt-get purge -y --auto-remove gnupg \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
