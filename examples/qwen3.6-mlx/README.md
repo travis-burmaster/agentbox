@@ -9,6 +9,7 @@ Talks to a host-side **`mlx_lm.server`** over the OpenAI-compatible API (`/v1/ch
 - 100% local inference on Apple Silicon — no Anthropic OAuth, no cloud LLM bills.
 - Qwen3.6-35B-A3B is an MoE model: ~35B total params but only ~3B activated per token, so generation is fast (~99 tok/s on M-series with 48 GB unified memory).
 - Native context window is 256K; this example advertises 64K to keep KV-cache RAM bounded.
+- The image extends `agentbox:latest` with the **GitHub CLI (`gh`)** so the agent can clone, read, and open PRs against your repos without leaving the container.
 
 ## Architecture
 
@@ -107,6 +108,8 @@ docker build --build-arg OPENCLAW_VERSION=2026.3.24 -t agentbox:latest .
 ```
 
 Pin to `2026.3.24` or later — earlier versions don't have the `tools.web.search` config schema.
+
+This example then extends `agentbox:latest` with the GitHub CLI (`gh`) via its own `Dockerfile`. Compose builds the derived image (tagged `agentbox-qwen-mlx:latest`) automatically on `up`.
 
 ## Quick Start
 

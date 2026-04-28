@@ -12,7 +12,12 @@
 
 services:
   agentbox-qwen:
-    image: agentbox:latest
+    # Built locally from ./Dockerfile — extends agentbox:latest with gh CLI.
+    # Make sure the base image exists first (from repo root: docker build -t agentbox:latest .)
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agentbox-qwen-mlx:latest
     container_name: agentbox-qwen
     hostname: agentbox-qwen
 
