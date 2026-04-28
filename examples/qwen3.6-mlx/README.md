@@ -184,6 +184,8 @@ docker compose restart
 
 No image rebuild needed — `./config` is mounted at `/agentbox/host-config:ro` and the entrypoint copies `openclaw.json` into place on each container start.
 
+> **Don't run `openclaw gateway restart` inside the container.** That subcommand drives a systemd-managed install and reports "Gateway service disabled" here. supervisord is what keeps the gateway alive in this image — restart it via `docker compose restart` (above) or `docker exec agentbox-qwen supervisorctl -c /etc/supervisor/conf.d/agentbox.conf restart openclaw-gateway`.
+
 ## Volume Map
 
 | Host Path                | Container Path                                  | Purpose                |
